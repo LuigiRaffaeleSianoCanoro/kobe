@@ -1,6 +1,6 @@
 import { SEED_ROSTER, type Person } from "./data";
 import { sql } from "./db";
-import type { TouchNote } from "./highlights";
+import { capRecentTouches, type TouchNote } from "./highlights";
 
 export { SAMPLE_CALENDAR } from "./data";
 
@@ -26,18 +26,24 @@ export async function loadRoster(): Promise<Person[]> {
 export async function loadTouches(): Promise<TouchNote[]> {
   if (!sql) return [];
   try {
+    // Newest first, then the cap. An ascending limit would keep the oldest drafts and drop this week.
     const rows = await sql<{ person_id: string | null; channel: string | null; body: string | null; created_at: Date | string }[]>`
-      select person_id, channel, coalesce(body, '') as body, created_at
-      from touches
-      where created_at >= now() - interval '14 days'
-      order by created_at asc
-      limit 100`;
-    return rows.flatMap((row) => {
+      select person_id, channel, body, created_at
+      from (
+        select person_id, channel, coalesce(body, '') as body, created_at
+        from touches
+        where created_at >= now() - interval '14 days'
+        order by created_at desc
+        limit 100
+      ) recent
+      order by created_at asc`;
+    const notes = rows.flatMap((row) => {
       if (!row.person_id) return [];
       const at = row.created_at instanceof Date ? row.created_at : new Date(row.created_at);
       if (Number.isNaN(at.getTime())) return [];
       return [{ personId: row.person_id, channel: row.channel ?? "", body: row.body ?? "", at: at.toISOString() }];
     });
+    return capRecentTouches(notes);
   } catch (error) {
     console.error("[kobe] Could not read logged drafts. The mixtape will use the records only.", error);
     return [];

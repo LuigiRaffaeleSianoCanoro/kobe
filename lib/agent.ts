@@ -8,8 +8,6 @@ const person = (id: RecordId, meta: string, right: string) => ({ id, meta, right
 
 export function scriptedReply(input: string): Reply {
   const t = input.toLowerCase();
-  if (/\b(mixtapes?|highlights?)\b/.test(t) || /what happened/.test(t) || /week in review/.test(t))
-    return { text: "Here's this week's mixtape. Every line is already on a stored record.", tool: { toolName: "weekly_highlights", args: {} } };
   if (/maya/.test(t) && /(draft|message|write|birthday)/.test(t))
     return {
       text: "Kept it warm and specific. She posted from a Brooklyn run club last week.",
@@ -50,6 +48,9 @@ export function scriptedReply(input: string): Reply {
       text: "These people are cooling off. One touch each keeps them in the rotation.",
       tool: { toolName: "show_people", args: { title: "COOLING OFF", people: [person("dev", "Unanswered WhatsApp", "9 DAYS"), person("priya", "Last LinkedIn like", "2 MO"), person("maya", "Last Instagram DM", "6 WK")] } },
     };
+  // After the person branches, so "what happened with Dev" stays a draft and a Marcus brief stays a brief.
+  if (/\b(mixtapes?|highlights?)\b/.test(t) || /what happened/.test(t) || /week in review/.test(t))
+    return { text: "Here's this week's mixtape. Every line is already on a stored record.", tool: { toolName: "weekly_highlights", args: {} } };
   return { text: "This offline demo only knows the sample roster and a few scripted questions. Try one of the suggestions above." };
 }
 

@@ -193,6 +193,25 @@ function cite(froms: Set<MixtapeLine["from"]>): string {
   return `On their record, ${extras[0]}, and ${extras[1]}`;
 }
 
+// The 14-day load is capped. Keep the newest notes, oldest-first, so this week is not the part that gets cut.
+export function capRecentTouches<T extends { at: string }>(notes: readonly T[], limit = 100): T[] {
+  if (notes.length <= limit) return [...notes];
+  return [...notes].sort((a, b) => Date.parse(a.at) - Date.parse(b.at)).slice(notes.length - limit);
+}
+
+// A failed save drops its own note. Later notes stay, and so does a later edit of the same person.
+export function undoFailedDraft<P>(
+  state: { touches: readonly TouchNote[]; people: Record<string, P> },
+  failed: { touch: TouchNote | null; personId?: string; written?: P; before?: P },
+): { touches: TouchNote[]; people: Record<string, P> } {
+  const people = { ...state.people };
+  if (failed.written && failed.personId && failed.before && people[failed.personId] === failed.written) people[failed.personId] = failed.before;
+  return {
+    touches: failed.touch ? state.touches.filter((item) => item !== failed.touch) : [...state.touches],
+    people,
+  };
+}
+
 type Cue = {
   personId: string;
   kind: MixtapeTrack["kind"];

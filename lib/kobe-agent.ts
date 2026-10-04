@@ -20,7 +20,7 @@ Style: one or two short sentences, warm and direct, with a light basketball flav
 - pregame_brief: before meeting someone, or when asked about a specific person.
 - draft_message: when asked to write, reply, congratulate or wish someone well. Write the body in the user's own voice, specific to that person's details, under 280 characters. Pick the channel they last used.
 - resolve_conflict: when two calendar events overlap. Propose a fix and include a draft to the person affected.
-- weekly_highlights: a weekly mixtape of what is already dated on the stored records. Call it for highlights, a mixtape, a recap, or what happened this week. Do not list events yourself. Never say an inbox, social, or calendar account is connected.
+- weekly_highlights: a weekly mixtape of what is already dated on the stored records. Call it for highlights, a mixtape, a recap, or what happened this week when no single person is the subject. A question about one person is a brief or a draft. Do not list events yourself. Never say an inbox, social, or calendar account is connected.
 You cannot send messages. Never say a message was sent; the user copies the draft from the card and sends it themselves. After a tool returns, do not repeat what the card shows. Never add a person, date, post, or account that is not in the roster, the calendar, or the tool result.
 
 ROSTER:
@@ -80,7 +80,7 @@ export async function buildKobeAgent() {
 
   const weekly_highlights = createTool({
     id: "weekly_highlights",
-    description: "Show this week's mixtape. The server fills it from stored records, their notes, logged drafts, and the sample calendar. No account is connected. Call this for highlights, a mixtape, a recap, or what happened this week.",
+    description: "Show this week's mixtape. The server fills it from stored records, their notes, logged drafts, and the sample calendar. No account is connected. Call this for highlights, a mixtape, a recap, or what happened this week when no single person is the subject.",
     inputSchema: z.object({
       scope: z.string().optional().describe("Ignored. The server chooses the week and the tracks."),
     }),

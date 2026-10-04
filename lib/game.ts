@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { ASSIST_XP, FEED, PLAYS, SEED_ROSTER, type DraftChannel, type FeedItem, type Person, type PlayId } from "./data";
-import type { TouchNote } from "./highlights";
+import { undoFailedDraft, type TouchNote } from "./highlights";
 import type { Season, SeasonEvent } from "./season";
 
 export type Alert = FeedItem & { id: number; visible: boolean; auto?: boolean };
@@ -152,14 +152,14 @@ export const game = {
   logDraft(key: string, { personId, to, channel, body, copied }: LoggedDraft) {
     if (state.logged[key]) return;
     const before = personId ? state.people[personId] : undefined;
-    const beforeTouches = state.touches;
     const startsDay = !state.activeToday;
-    const touch = before && body.trim() ? { personId: before.id, channel, body: body.trim(), at: new Date().toISOString() } : null;
+    const touch: TouchNote | null = before && body.trim() ? { personId: before.id, channel, body: body.trim(), at: new Date().toISOString() } : null;
+    const written = before ? { ...before, rapport: Math.min(99, before.rapport + 3), last: `${channel} · just now` } : undefined;
     set((s) => ({
       logged: { ...s.logged, [key]: true },
       assists: s.assists + 1,
       ...markActive(s),
-      people: before ? { ...s.people, [before.id]: { ...before, rapport: Math.min(99, before.rapport + 3), last: `${channel} · just now` } } : s.people,
+      people: written ? { ...s.people, [written.id]: written } : s.people,
       touches: touch ? [...s.touches, touch] : s.touches,
     }));
     game.award(ASSIST_XP, "ASSIST");
@@ -174,14 +174,18 @@ export const game = {
     });
     sync({ type: "assist", personId, channel, body }, () => {
       game.dismiss(logged);
-      set((s) => ({
-        logged: { ...s.logged, [key]: false },
-        xp: s.xp - ASSIST_XP,
-        assists: s.assists - 1,
-        people: before ? { ...s.people, [before.id]: before } : s.people,
-        touches: beforeTouches,
-        ...(startsDay ? { streak: s.streak - 1, activeToday: false } : {}),
-      }));
+      // Drop only this note. A snapshot of the whole list would also erase drafts logged after this one.
+      set((s) => {
+        const undone = undoFailedDraft(s, { touch, personId: written?.id, written, before });
+        return {
+          logged: { ...s.logged, [key]: false },
+          xp: s.xp - ASSIST_XP,
+          assists: s.assists - 1,
+          people: undone.people,
+          touches: undone.touches,
+          ...(startsDay ? { streak: s.streak - 1, activeToday: false } : {}),
+        };
+      });
       game.pushAlert({ at: 0, kind: "NOT SAVED", source: "SEASON", color: "#E5484D", title: `Couldn't log your message to ${to}`, body: "Their record was not updated. Try again in a moment.", auto: true });
     });
     if (personId === "maya" || personId === "dev") game.completePlay(personId);

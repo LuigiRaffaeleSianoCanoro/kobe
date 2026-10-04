@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CHIPS, D, INITIAL_SOURCES, PAIR_CODE, VOICE_LINES, type AlertAction, type FeedItem } from "./data";
 import { reply, type AgentReply } from "./agent";
 import { Court } from "./Court";
@@ -128,7 +128,7 @@ export default function App() {
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [messages.length, typing]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = headerRef.current;
     if (!el) return;
     const measure = () => {
@@ -139,7 +139,7 @@ export default function App() {
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [vw]);
+  }, []);
 
   const startRec = () => {
     setRec(true);
@@ -248,9 +248,10 @@ export default function App() {
     const v = a.visible && (wide || shown++ < 1);
     return { ...a, visible: v };
   });
+  const headerDelta = wide ? 0 : Math.max(0, headerHeight - 68);
   const lane = wide
     ? { chatTop: 68, chatRight: 380, laneTop: 76, laneBottom: 104, laneRight: 20, laneW: "340px", laneMask: "linear-gradient(#000 calc(100% - 24px), transparent)" }
-    : { chatTop: 284, chatRight: 0, laneTop: headerHeight + 8, laneBottom: "calc(100vh - 280px)", laneRight: 16, laneW: "calc(100vw - 32px)", laneMask: "none" };
+    : { chatTop: 284 + headerDelta, chatRight: 0, laneTop: 72 + headerDelta, laneBottom: `calc(100vh - ${280 + headerDelta}px)`, laneRight: 16, laneW: "calc(100vw - 32px)", laneMask: "none" };
 
   const pc = D.channels.find((c) => c.id === pairing) ?? D.channels[0];
   const added = !!channels[pc.id];
@@ -264,7 +265,7 @@ export default function App() {
   return (
     <>
       <Court />
-      <header ref={headerRef} style={{ position: "fixed", top: 0, left: 0, right: 0, minHeight: 68, height: wide ? 68 : "auto", display: "flex", flexWrap: wide ? "nowrap" : "wrap", alignItems: "center", alignContent: "center", columnGap: wide ? 16 : 10, rowGap: 8, padding: wide ? "0 20px" : "10px 16px", zIndex: 20 }}>
+      <header ref={headerRef} style={{ position: "fixed", top: 0, left: 0, right: 0, minHeight: 68, boxSizing: "border-box", display: "flex", flexWrap: "wrap", alignItems: "center", alignContent: "center", columnGap: 12, rowGap: 8, padding: "0 16px", zIndex: 20 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "none" }}>
           <Ball size={26} shadow="0 2px 10px rgba(224,113,42,.45)" />
           <div style={{ fontWeight: 800, fontStretch: "72%", fontSize: 24, letterSpacing: ".01em", lineHeight: 1, whiteSpace: "nowrap" }}>
@@ -275,7 +276,7 @@ export default function App() {
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3DBE8B", boxShadow: "0 0 10px #3DBE8B", animation: "kpulse 1.8s ease-in-out infinite" }} />
           <span>SCOUTING {connectedCount} SOURCES</span>
         </div>
-        <div style={{ marginLeft: wide ? "auto" : 0, flex: wide ? "none" : "1 0 100%", display: "flex", gap: 8, justifyContent: wide ? "flex-start" : "flex-end" }}>
+        <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end", maxWidth: "100%" }}>
           <button className="hover-int" aria-label="Roster" onClick={() => setModal("roster")} style={{ display: "flex", alignItems: "center", gap: 8, flex: "none", height: 38, padding: "0 14px", borderRadius: 999, background: "rgba(16,12,20,.6)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,.1)", color: "#F4F1EC", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
             <span>Roster</span>
             <span style={{ font: `600 11px ${mono}`, padding: "2px 6px", borderRadius: 6, background: "rgba(242,182,58,.18)", color: "#F2B63A" }}>{people.length}</span>

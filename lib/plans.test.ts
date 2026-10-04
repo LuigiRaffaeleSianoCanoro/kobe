@@ -3,8 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import {
   PlanWrite,
-  applyPlanRemove,
-  applyPlanSave,
+  insertPlanRecord,
   interpretPlan,
   isPlanAsk,
   mentionsConnectedAccount,
@@ -15,6 +14,7 @@ import {
   planId,
   planIdForCard,
   planIdReuse,
+  plansFromStoredJson,
   recordSupports,
   type PlanPerson,
 } from "./plans.ts";
@@ -130,14 +130,79 @@ test("a daily routine is not a trigger", () => {
   assert.equal(intent.plan.personId, "priya");
 });
 
-test("connected accounts are refused", () => {
+test("watching for a reply is refused instead of becoming a weekly check-in", () => {
   for (const line of [
-    "Set a trigger when Maya posts on Instagram",
-    "Remind me when Dev texts me",
     "Remind me when Dev replies",
     "Remind me when Maya responds",
     "Remind me when Maya writes back",
     "Remind me if Dev answers",
+    "Remind me to message Maya when she replies",
+    "Remind me if Maya sends me a text",
+    "Remind me once Dev replies",
+    "Remind me after Dev replies",
+    "Remind me whenever Dev replies",
+    "Remind me as soon as Dev answers",
+    "Remind me when I hear from Dev",
+    "Remind me if Dev doesn't reply",
+    "Once Dev replies",
+    "After Dev replies",
+    "Whenever Dev replies",
+    "as soon as Dev answers",
+    "when I hear from Dev",
+    "if Dev doesn't reply",
+  ]) {
+    const intent = interpretPlan(line, roster);
+    assert.equal(intent.type, "say", line);
+    if (intent.type !== "say") continue;
+    assert.match(intent.text, /No accounts are connected/);
+    assert.equal("plan" in intent, false);
+    const reply = offlinePlanReply(line, roster);
+    assert.equal(reply?.args, undefined, line);
+  }
+  const birthday = interpretPlan("Remind me before Maya's birthday", roster);
+  assert.equal(birthday.type, "plan");
+  const sunday = interpretPlan("Every Sunday, check in with Dev", roster);
+  assert.equal(sunday.type, "plan");
+  if (sunday.type === "plan") assert.equal(sunday.plan.condition, "weekly");
+  const replyToDev = interpretPlan("Remind me to reply to Dev", roster);
+  assert.equal(replyToDev.type, "plan");
+  if (replyToDev.type === "plan") assert.equal(replyToDev.plan.personId, "dev");
+});
+
+test("a second tab's plan is kept when this tab saves another", () => {
+  const dev = {
+    id: planId("tab-dev"),
+    personId: "dev",
+    kind: "routine" as const,
+    condition: "weekly" as const,
+    label: "Check in with Dev every Sunday",
+    prompt: "Draft a reply to Dev",
+  };
+  const maya = {
+    id: planId("tab-maya"),
+    personId: "maya",
+    kind: "trigger" as const,
+    condition: "birthday" as const,
+    label: "When Maya's birthday is on the record",
+    prompt: "Draft a birthday message for Maya",
+  };
+  const merged = insertPlanRecord([dev], maya);
+  assert.equal(merged.status, "saved");
+  if (merged.status !== "saved") return;
+  assert.deepEqual(merged.plans.map((plan) => plan.personId), ["dev", "maya"]);
+  const again = insertPlanRecord(merged.plans, { ...maya, id: planId("other-maya") });
+  assert.equal(again.status, "duplicate");
+  if (again.status === "duplicate") assert.equal(again.plans.length, 2);
+  const clash = insertPlanRecord(merged.plans, { ...dev, id: maya.id, personId: "dev" });
+  assert.equal(clash.status, "conflict");
+  assert.equal(plansFromStoredJson("{"), null);
+  assert.deepEqual(plansFromStoredJson(null), []);
+});
+
+test("connected accounts are refused", () => {
+  for (const line of [
+    "Set a trigger when Maya posts on Instagram",
+    "Remind me when Dev texts me",
     "Set a trigger for Maya from Gmail",
     "Connect Slack and add a routine",
   ]) {
@@ -149,8 +214,6 @@ test("connected accounts are refused", () => {
   assert.equal(reconnect.type, "plan");
   const textHer = interpretPlan("Set a weekly routine to text Maya", roster);
   assert.equal(textHer.type, "plan");
-  const replyToDev = interpretPlan("Remind me to reply to Dev", roster);
-  assert.equal(replyToDev.type, "plan");
 });
 
 test("unknown, ambiguous, and missing people stay off invented records", () => {
@@ -265,33 +328,6 @@ test("offline set_plan args use recordId and parse on the card", () => {
   );
   assert.equal(fromPersonId.success, true);
   if (fromPersonId.success) assert.equal(fromPersonId.data.personId, "maya");
-});
-
-test("a second tab merges onto stored plans instead of replacing them", () => {
-  const dev = {
-    id: planId("dev-weekly"),
-    personId: "dev",
-    kind: "routine" as const,
-    condition: "weekly" as const,
-    label: "Check in with Dev every week",
-    prompt: "Draft a reply to Dev",
-  };
-  const maya = {
-    id: planId("maya-birthday"),
-    personId: "maya",
-    kind: "trigger" as const,
-    condition: "birthday" as const,
-    label: "When Maya's birthday is on the record",
-    prompt: "Draft a birthday message for Maya",
-  };
-  const saved = applyPlanSave([dev], maya);
-  assert.equal(saved.status, "saved");
-  if (saved.status === "saved") assert.deepEqual(saved.plans.map((plan) => plan.personId), ["dev", "maya"]);
-  const removed = applyPlanRemove([dev, maya], dev.id);
-  assert.deepEqual(removed.map((plan) => plan.personId), ["maya"]);
-  const conflict = applyPlanSave([maya], { ...dev, id: maya.id });
-  assert.equal(conflict.status, "rejected");
-  if (conflict.status === "rejected") assert.deepEqual(conflict.plans, [maya]);
 });
 
 test("a reused plan id is a conflict when it belongs to someone else", () => {

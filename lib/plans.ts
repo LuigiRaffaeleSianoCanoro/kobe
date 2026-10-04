@@ -67,13 +67,21 @@ const SKIP_NAME = new Set([
 ]);
 
 const ACCOUNT =
-  /\b(?:connect(?:ed|ion)?|oauth|inbox|webhook|integrations?|e-?mails?|gmail|outlook|icloud|slack|discord|telegram|whatsapp|instagram|linkedin|fathom|zoom|partiful|luma|eventbrite|calendly|tiktok|facebook|threads|google calendar|gcal)\b|\b(?:when|if)\s+[\p{L}'’.-]+(?:\s+[\p{L}'’.-]+){0,2}\s+(?:texts?|dms?|messages?|posts?|emails?|calls?|replies|responds|answers|writes?\s+back|gets?\s+back)\b/iu;
+  /\b(?:connect(?:ed|ion)?|oauth|inbox|webhook|integrations?|e-?mails?|gmail|outlook|icloud|slack|discord|telegram|whatsapp|instagram|linkedin|fathom|zoom|partiful|luma|eventbrite|calendly|tiktok|facebook|threads|google calendar|gcal)\b|\bwhen\s+[\p{L}'’.-]+(?:\s+[\p{L}'’.-]+){0,2}\s+(?:texts?|dms?|messages?|posts?|emails?|calls?)\b/iu;
 
 export const ACCOUNT_REPLY =
   "No accounts are connected. I can set a trigger or routine from a birthday, last touch, next plan, or open loop already on someone's record.";
 
 export function mentionsConnectedAccount(text: string): boolean {
   return ACCOUNT.test(text);
+}
+
+// Waiting on an incoming message is an inbox, not a weekly check-in. Birthday, quiet, and next-up asks name a field on the record and do not match this.
+const INCOMING_REPLY =
+  /\b(?:when|if|once|after|whenever|as soon as)\b[\s\S]{0,80}?\b(?:replies|reply|responds|respond|answers|answer|writes?\s+back|gets?\s+back|hears?\s+from|sends?|texts?|dms?|messages?|posts?|emails?|calls?)\b/iu;
+
+export function watchesIncomingReply(text: string): boolean {
+  return INCOMING_REPLY.test(text);
 }
 
 export function conditionFits(kind: PlanKind, condition: PlanCondition): boolean {
@@ -127,25 +135,6 @@ export function samePlan(a: Pick<Plan, "personId" | "kind" | "condition">, b: Pi
   return a.personId === b.personId && a.kind === b.kind && a.condition === b.condition;
 }
 
-export type PlanSaveMerge =
-  | { plans: Plan[]; status: "saved" | "duplicate" }
-  | { plans: Plan[]; status: "rejected"; message: string };
-
-// A tab must merge onto the list it just read. Writing its older memory replaces the other tab's plans.
-export function applyPlanSave(stored: Plan[], plan: Plan): PlanSaveMerge {
-  const byId = stored.find((item) => item.id === plan.id);
-  if (byId) {
-    if (planIdReuse(byId, plan) === "duplicate") return { plans: stored, status: "duplicate" };
-    return { plans: stored, status: "rejected", message: "That plan id is already on a different record." };
-  }
-  if (stored.some((item) => samePlan(item, plan))) return { plans: stored, status: "duplicate" };
-  return { plans: [...stored, plan], status: "saved" };
-}
-
-export function applyPlanRemove(stored: Plan[], id: string): Plan[] {
-  return stored.filter((plan) => plan.id !== id);
-}
-
 export type PlanIdReuse = "duplicate" | "conflict";
 
 // A row that already owns this id can stand in for the save only when it is the same plan.
@@ -195,8 +184,16 @@ export function planFromToolArgs(args: { recordId?: string; personId?: string; k
   });
 }
 
-function plansInJson(data: unknown): Plan[] {
-  if (!Array.isArray(data)) return [];
+/** Null when the stored value cannot be merged. Empty storage is an empty list, not a failure. */
+export function plansFromStoredJson(raw: string | null): Plan[] | null {
+  if (raw == null) return [];
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(data)) return null;
   const seen = new Set<string>();
   return data.flatMap((item) => {
     const parsed = PlanWrite.safeParse(item);
@@ -206,20 +203,23 @@ function plansInJson(data: unknown): Plan[] {
   });
 }
 
-/** Null when the saved value is not a plan list. Callers must not overwrite it. */
-export function plansFromStoredJson(raw: string): Plan[] | null {
-  try {
-    const data = JSON.parse(raw) as unknown;
-    if (!Array.isArray(data)) return null;
-    return plansInJson(data);
-  } catch {
-    return null;
-  }
+export function parseStoredPlans(raw: string | null): Plan[] {
+  return plansFromStoredJson(raw) ?? [];
 }
 
-export function parseStoredPlans(raw: string | null): Plan[] {
-  if (!raw) return [];
-  return plansFromStoredJson(raw) ?? [];
+export function insertPlanRecord(
+  stored: readonly Plan[],
+  plan: Plan,
+): { status: "saved"; plans: Plan[] } | { status: "duplicate"; plans: Plan[] } | { status: "conflict" } {
+  const byId = stored.find((item) => item.id === plan.id);
+  if (byId) return planIdReuse(byId, plan) === "duplicate" ? { status: "duplicate", plans: [...stored] } : { status: "conflict" };
+  const same = stored.find((item) => samePlan(item, plan));
+  if (same) return { status: "duplicate", plans: [...stored] };
+  return { status: "saved", plans: [...stored, plan] };
+}
+
+export function withoutPlan(stored: readonly Plan[], id: string): Plan[] {
+  return stored.filter((item) => item.id !== id);
 }
 
 export function recordSupports(person: Pick<PlanPerson, "birthday" | "last" | "next" | "loop">, condition: PlanCondition): boolean {
@@ -281,6 +281,7 @@ export type PlanIntent =
 
 export function isPlanAsk(text: string): boolean {
   const folded = fold(text);
+  if (watchesIncomingReply(text)) return true;
   if (/\b(trigger|routine)\b/.test(folded)) return true;
   if (/\bremind me\b/.test(folded)) return true;
   if (/\b(every|each)\s+(day|week|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/.test(folded)) return true;
@@ -291,7 +292,7 @@ export function isPlanAsk(text: string): boolean {
 
 export function interpretPlan(text: string, people: PlanPerson[]): PlanIntent {
   if (!isPlanAsk(text)) return { type: "ignore" };
-  if (mentionsConnectedAccount(text)) return { type: "say", text: ACCOUNT_REPLY };
+  if (mentionsConnectedAccount(text) || watchesIncomingReply(text)) return { type: "say", text: ACCOUNT_REPLY };
 
   const spec = detectSpec(fold(text));
   const found = matchPeople(text, people);
@@ -338,7 +339,10 @@ function detectSpec(folded: string): { type: "ready"; kind: PlanKind; condition:
   }
   const specific = specificTrigger(folded);
   if (specific) return { type: "ready", kind: "trigger", condition: specific };
-  if (/\bremind me\b/.test(folded)) return { type: "ready", kind: "routine", condition: daily && !weekly ? "daily" : "weekly" };
+  // A bare reminder can be a weekly check-in. One that waits on a reply is refused earlier.
+  if (/\bremind me\b/.test(folded) && !/\b(?:when|if|once)\b/.test(folded)) {
+    return { type: "ready", kind: "routine", condition: daily && !weekly ? "daily" : "weekly" };
+  }
   return { type: "missing" };
 }
 

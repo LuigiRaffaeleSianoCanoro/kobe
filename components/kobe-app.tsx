@@ -15,6 +15,7 @@ import { Mic, Square } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
+import { isLiveConnector } from "@/lib/connectors";
 import { CHANNELS, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
 import { game, registerAsk, useGame } from "@/lib/game";
 import { LANG_NAMES, dictation, useHydrated, useVoice, voice } from "@/lib/voice";
@@ -637,6 +638,14 @@ function Modal({ open, onClose, children, width }: { open: boolean; onClose: () 
   );
 }
 
+function LiveBadge() {
+  return <span className="label flex-none rounded-md bg-green/15 px-1.5 py-0.5 text-[10px] text-green">LIVE</span>;
+}
+
+function NotConnected() {
+  return <span className="label flex-none rounded-md bg-white/[.07] px-1.5 py-0.5 text-[10px] text-chalk-3">NOT CONNECTED</span>;
+}
+
 function Integrations() {
   const modal = useGame((s) => s.modal);
   const close = () => game.openModal(null);
@@ -661,7 +670,9 @@ function Integrations() {
           <>
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Scouting sources</div>
-              <div className="text-sm text-[#BDB5AA]">Kobe will read them to build context and never post on your behalf.</div>
+              <div className="text-sm text-[#BDB5AA]">
+                Gmail and Slack are the live connectors. Every other source stays on this device and does not send.
+              </div>
             </div>
             {SOURCE_GROUPS.map((g) => (
               <div key={g.name} className="flex flex-col gap-2.5">
@@ -672,8 +683,9 @@ function Integrations() {
                       <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.07] text-[#CFC7BB]"><ServiceLogo id={it.id} size={22} /></span>
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span className="text-sm font-semibold">{it.name}</span>
-                        <span className="truncate text-xs text-[#ACA397]">{it.desc}</span>
+                        <span className="truncate text-xs text-[#ACA397]">{isLiveConnector(it.id) ? "Live connector" : "Not connected"}</span>
                       </span>
+                      {isLiveConnector(it.id) ? <LiveBadge /> : <NotConnected />}
                     </div>
                   ))}
                 </div>
@@ -684,7 +696,7 @@ function Integrations() {
           <>
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Put Kobe in your rotation</div>
-              <div className="text-sm text-[#BDB5AA]">Talk to Kobe wherever you already message.</div>
+              <div className="text-sm text-[#BDB5AA]">Slack can send. Telegram, WhatsApp, and Discord are not connected.</div>
             </div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2">
               {CHANNELS.map((ch) => (
@@ -692,8 +704,9 @@ function Integrations() {
                   <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.08]"><ServiceLogo id={ch.id} size={22} /></span>
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="text-sm font-semibold">{ch.name}</span>
-                    <span className="truncate text-xs text-[#ACA397]">{ch.desc}</span>
+                    <span className="truncate text-xs text-[#ACA397]">{isLiveConnector(ch.id) ? "Live connector" : "Not connected"}</span>
                   </span>
+                  {isLiveConnector(ch.id) ? <LiveBadge /> : <NotConnected />}
                 </div>
               ))}
             </div>

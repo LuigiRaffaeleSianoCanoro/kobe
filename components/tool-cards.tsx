@@ -3,8 +3,10 @@
 import type { DataMessagePartProps, ToolCallMessagePartProps } from "@assistant-ui/react";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
+import { deliverDraft } from "@/lib/connectors";
 import { isDraftChannel } from "@/lib/data";
 import { game, useGame } from "@/lib/game";
+import { planDetail, planFromToolArgs, planIdForCard, recordSupports, samePlan, type PlanCondition, type PlanKind } from "@/lib/plans";
 import type { ImportCard as Imported } from "@/lib/whatsapp/upload";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
@@ -139,18 +141,35 @@ export function BriefCard({ args, result }: ToolCallMessagePartProps) {
 type Draft = { recordId: string; channel: string; body: string };
 
 function DraftBody({ draft, logKey, ready }: { draft: Partial<Draft>; logKey: string; ready: boolean }) {
-  const logged = useGame((s) => !!s.logged[logKey]);
+  const sent = useGame((s) => !!s.sent[logKey]);
   const person = usePerson(draft.recordId);
   const [edited, setEdited] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   const body = edited ?? draft.body ?? "";
   const to = person?.name ?? draft.recordId ?? "";
   const channel = isDraftChannel(draft.channel) ? draft.channel : undefined;
 
-  const copyAndLog = async () => {
-    if (!channel) return;
+  const copyDraft = async () => {
+    if (!channel || !body) return;
     const copied = (await navigator.clipboard?.writeText(body).then(() => true, () => false)) ?? false;
-    game.logDraft(logKey, { personId: person?.id, to, channel, body, copied });
+    setNotice(copied ? "Copied. Not sent." : "Couldn't copy. Not sent.");
+  };
+  const sendDraft = async () => {
+    if (!ready || !body || sending || sent) return;
+    if (!channel) {
+      setNotice("That channel is not connected.");
+      return;
+    }
+    setSending(true);
+    const result = await deliverDraft(channel, { to, body });
+    setSending(false);
+    if (!result.ok) {
+      setNotice(result.reason);
+      return;
+    }
+    game.recordSent(logKey, { personId: person?.id, to, channel, body });
   };
   return (
     <>
@@ -173,28 +192,34 @@ function DraftBody({ draft, logKey, ready }: { draft: Partial<Draft>; logKey: st
           {!ready && <span className="ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 animate-pulse bg-gold" />}
         </p>
       )}
-      {logged ? (
+      {sent ? (
         <motion.div
           initial={{ opacity: 0, transform: "translateY(4px)" }}
           animate={{ opacity: 1, transform: "translateY(0px)" }}
           transition={{ duration: 0.25, ease: EASE_OUT }}
           className="label text-green"
         >
-          ✓ ASSIST LOGGED{person ? " · RAPPORT +3" : ""}
+          ✓ SENT{person ? " · RAPPORT +3" : ""}
         </motion.div>
       ) : (
-        <div className="flex gap-2">
-          <button
-            disabled={!ready || !body || !channel}
-            onClick={copyAndLog}
-            className="press rounded-full bg-gold px-3.5 py-2 text-[12.5px] font-bold text-ink disabled:opacity-50"
-          >
-            Copy for {draft.channel ?? "…"}
-          </button>
-          <button disabled={!ready} onClick={() => setEditing((e) => !e)} className="press rounded-full border border-white/15 px-3.5 py-2 text-[12.5px] disabled:opacity-50">
-            {editing ? "Done" : "Edit"}
-          </button>
-        </div>
+        <>
+          {notice && <div className="text-[12.5px] text-[#BDB5AA]">{notice}</div>}
+          <div className="flex flex-wrap gap-2">
+            <button
+              disabled={!ready || !body || !channel}
+              onClick={copyDraft}
+              className="press rounded-full bg-gold px-3.5 py-2 text-[12.5px] font-bold text-ink disabled:opacity-50"
+            >
+              Copy for {draft.channel ?? "…"}
+            </button>
+            <button disabled={!ready || !body || sending} onClick={sendDraft} className="press rounded-full border border-white/15 px-3.5 py-2 text-[12.5px] disabled:opacity-50">
+              {sending ? "Sending" : "Send"}
+            </button>
+            <button disabled={!ready} onClick={() => setEditing((e) => !e)} className="press rounded-full border border-white/15 px-3.5 py-2 text-[12.5px] disabled:opacity-50">
+              {editing ? "Done" : "Edit"}
+            </button>
+          </div>
+        </>
       )}
     </>
   );
@@ -209,6 +234,87 @@ export function DraftCard({ args, toolCallId, status }: ToolCallMessagePartProps
 }
 
 type Slot = { title: string; source: string; where: string };
+
+function blockedReason(result: unknown): string | null {
+  if (!result || typeof result !== "object" || !("ok" in result)) return null;
+  const row = result as { ok?: unknown; reason?: unknown };
+  if (row.ok !== false) return null;
+  return typeof row.reason === "string" && row.reason.trim() ? row.reason : "That can't be saved on the record.";
+}
+
+type PlanArgs = { recordId?: string; personId?: string; kind?: PlanKind; condition?: PlanCondition; label?: string; prompt?: string };
+
+export function PlanCard({ args, toolCallId, status, result }: ToolCallMessagePartProps) {
+  const draft = args as PlanArgs;
+  const recordId = draft.recordId || draft.personId;
+  const person = usePerson(recordId);
+  const plans = useGame((s) => s.plans);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const allocated = recordId && draft.kind && draft.condition ? planIdForCard(toolCallId || "draft", { personId: recordId, kind: draft.kind, condition: draft.condition }) : null;
+  const blocked = blockedReason(result);
+  const parsed = planFromToolArgs(draft, allocated ?? "plan_pendingrecord");
+  const ready = status.type !== "running" && !!allocated && parsed.success && !!person && !!draft.condition && recordSupports(person, draft.condition) && !blocked;
+  const unmet =
+    status.type !== "running" && !ready && !blocked
+      ? !person
+        ? "That person isn't on the roster."
+        : person && draft.condition && !recordSupports(person, draft.condition)
+          ? `${person.name}'s record doesn't have that, so I won't invent it.`
+          : !parsed.success
+            ? (parsed.error.issues[0]?.message ?? "That plan can't be saved.")
+            : null
+      : null;
+  const cardMatch = allocated && parsed.success ? plans.find((plan) => plan.id === allocated && samePlan(plan, parsed.data)) : undefined;
+  const slotMatch = parsed.success ? plans.find((plan) => samePlan(plan, parsed.data)) : undefined;
+  const stored = cardMatch ?? slotMatch;
+
+  const save = async () => {
+    if (!parsed.success || busy) return;
+    setBusy(true);
+    setError(null);
+    const saved = await game.savePlan(parsed.data);
+    setBusy(false);
+    if (saved.status === "rejected") setError(saved.message);
+  };
+
+  return (
+    <CardIn className="glass flex flex-col gap-3 rounded-2xl border-gold/25! p-4">
+      <div className="label flex items-center gap-2 text-gold">
+        <span>{draft.kind === "routine" ? "Routine" : "Trigger"}</span>
+        <span className="text-chalk-3">On the record</span>
+      </div>
+      {person && draft.label ? (
+        <>
+          <div className="text-[15px] leading-snug">{draft.label}</div>
+          <div className="text-[13px] leading-snug text-[#BDB5AA]">{person.name}{draft.condition ? ` · ${planDetail(person, draft.condition)}` : ""}</div>
+          <p className="text-[12.5px] leading-snug text-chalk-3">This stays on their record. No account is connected.</p>
+        </>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <Shimmer w="70%" />
+          <Shimmer w="45%" />
+        </div>
+      )}
+      {blocked ? (
+        <div className="text-[13px] leading-snug text-red">{blocked}</div>
+      ) : stored ? (
+        <div className="label text-green">{cardMatch ? "✓ On their record" : "✓ Already on their record"}</div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {error && <div className="text-[13px] leading-snug text-red">{error}</div>}
+          {unmet ? (
+            <div className="text-[13px] leading-snug text-red">{unmet}</div>
+          ) : (
+            <button type="button" disabled={!ready || busy} onClick={() => void save()} className="press self-start rounded-full bg-gold px-3.5 py-2 text-[12.5px] font-bold text-ink disabled:opacity-50">
+              {busy ? "Saving" : "Save to record"}
+            </button>
+          )}
+        </div>
+      )}
+    </CardIn>
+  );
+}
 
 export function ConflictCard({ args, toolCallId, status }: ToolCallMessagePartProps) {
   const c = args as Partial<{ slot: string; a: Partial<Slot>; b: Partial<Slot>; draft: Partial<Draft> }>;

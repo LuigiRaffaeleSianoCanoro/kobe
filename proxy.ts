@@ -11,7 +11,22 @@ function passwordFrom(req: NextRequest) {
   return decoded.slice(decoded.indexOf(":") + 1);
 }
 
+// Browsers resend a cached Basic login on cross-site form posts. SameSite does not apply to that.
+function crossSiteApiWrite(req: NextRequest) {
+  if (req.method === "GET" || !req.nextUrl.pathname.startsWith("/api/")) return false;
+  const site = req.headers.get("sec-fetch-site");
+  if (site) return site !== "same-origin";
+  const origin = req.headers.get("origin");
+  if (!origin) return false;
+  try {
+    return new URL(origin).host !== req.headers.get("host");
+  } catch {
+    return true;
+  }
+}
+
 export function proxy(req: NextRequest) {
+  if (crossSiteApiWrite(req)) return Response.json({ error: "Cross-site request." }, { status: 403 });
   const a = access();
   if (a.mode === "open") return NextResponse.next();
   if (a.mode === "locked") {

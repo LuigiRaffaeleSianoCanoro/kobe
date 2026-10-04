@@ -20,7 +20,7 @@ describe("POST /api/chat after a WhatsApp import", () => {
       { id: "u2", role: "user", parts: [{ type: "text", text: "Brief me on her" }] },
     ];
 
-    await expect(POST(new Request("http://localhost/api/chat", { method: "POST", body: JSON.stringify({ messages }) }))).rejects.toThrow("No model in tests.");
+    await expect(POST(new Request("http://localhost/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ messages }) }))).rejects.toThrow("No model in tests.");
 
     expect(seen).toEqual([
       expect.objectContaining({ role: "user", parts: [{ type: "text", text: "WhatsApp Chat - Valentina Ríos.zip" }] }),

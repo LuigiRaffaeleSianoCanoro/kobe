@@ -1,4 +1,4 @@
-// The scripted agent and the chat transport read the note Luigi just saved, without a server round trip.
+// The scripted agent reads the note just saved in this browser. The live agent reads the database.
 let notes: Record<string, string> = {};
 
 export function publishCoaching(next: Record<string, string>) {
@@ -8,8 +8,4 @@ export function publishCoaching(next: Record<string, string>) {
 export function coachingFor(personId: string | undefined): string | undefined {
   if (!personId) return undefined;
   return notes[personId] || undefined;
-}
-
-export function coachingPayload(): { personId: string; note: string }[] {
-  return Object.entries(notes).map(([personId, note]) => ({ personId, note }));
 }

@@ -2,7 +2,7 @@ import { sql } from "./db";
 
 export type SavedCoaching = { personId: string; note: string; at: string };
 
-// Null means there is no database. An empty list means the table was missing or had no rows.
+// Null means there is no database, or the read failed. An empty list means the query succeeded and there are no notes.
 export async function readCoaching(): Promise<SavedCoaching[] | null> {
   if (!sql) return null;
   try {
@@ -15,7 +15,7 @@ export async function readCoaching(): Promise<SavedCoaching[] | null> {
     }));
   } catch (error) {
     console.error("[kobe] Could not read coaching notes. Re-run db/schema.sql if this database predates game tape.", error);
-    return [];
+    return null;
   }
 }
 

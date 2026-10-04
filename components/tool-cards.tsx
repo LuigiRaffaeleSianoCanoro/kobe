@@ -567,6 +567,38 @@ export function ConflictCard({ args, toolCallId, status }: ToolCallMessagePartPr
   );
 }
 
+export function TapeCard() {
+  const people = useGame((s) => Object.values(s.people));
+  return (
+    <CardIn className="glass overflow-hidden rounded-2xl">
+      <div className="label flex items-center justify-between px-4 pt-3 pb-2 text-gold">
+        <span>GAME TAPE</span>
+        <span className="text-chalk-3">REVIEW</span>
+      </div>
+      {people.map((person, i) => (
+        <motion.button
+          key={person.id}
+          onClick={() => game.openTape(person.id)}
+          initial={{ opacity: 0, transform: "translateY(6px)" }}
+          animate={{ opacity: 1, transform: "translateY(0px)" }}
+          transition={{ duration: 0.3, ease: EASE_OUT, delay: 0.08 + i * 0.05 }}
+          className="row press flex w-full items-center gap-3 border-t border-white/[.06] px-4 py-3 text-left"
+        >
+          <span className="display grid h-9 w-9 flex-none place-items-center rounded-full bg-gold/15 text-[15px] text-gold">
+            {person.name.split(" ").map((word) => word[0]).join("")}
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="text-[14.5px] font-semibold">{person.name}</span>
+            <span className="text-[12.5px] text-[#BDB5AA]">{person.role}</span>
+          </span>
+          <span className="label text-gold">TAPE</span>
+        </motion.button>
+      ))}
+      {people.length === 0 && <p className="border-t border-white/[.06] px-4 py-4 text-sm text-[#BDB5AA]">No one on the roster.</p>}
+    </CardIn>
+  );
+}
+
 // Posted by the page itself after /api/imports/whatsapp stores a chat, never by the model.
 export function ImportCard(part: DataMessagePartProps) {
   const data = part.data as Imported;

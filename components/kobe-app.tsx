@@ -21,10 +21,9 @@ import { Mic, Paperclip, Square, Volume2, VolumeX } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
 import { createContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type MouseEvent, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
-import { coachingPayload } from "@/lib/coaching-memory";
 import { isLiveConnector, type ConnectorFlags } from "@/lib/connectors";
 import { CHANNELS, PLAYS, RECORDS, SAMPLE_CALENDAR, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
-import { game, registerAsk, useGame } from "@/lib/game";
+import { flushTape, game, registerAsk, useGame } from "@/lib/game";
 import { weeklyMixtape, type TouchNote } from "@/lib/highlights";
 import { NOTE_MAX, clipFrom } from "@/lib/tape";
 import { LANG_NAMES, dictation, speech, useHydrated, useVoice, voice } from "@/lib/voice";
@@ -34,21 +33,24 @@ import { CourtShader } from "./court-shader";
 import { HighlightsCard, MixtapeView } from "./mixtape";
 import { SavedPlanList, SetPlan } from "./plan-panel";
 import { ServiceLogo } from "./service-logo";
-import { BriefCard, ConflictCard, ConnectorDraftCard, ConnectorSendCard, DraftCard, GmailSearchCard, ImportCard, PeopleCard, PlanCard, SlackSearchCard } from "./tool-cards";
+import { BriefCard, ConflictCard, ConnectorDraftCard, ConnectorSendCard, DraftCard, GmailSearchCard, ImportCard, PeopleCard, PlanCard, SlackSearchCard, TapeCard } from "./tool-cards";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
-const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any conflicts this week?", "Who haven't I talked to lately?", "Remind me before Maya's birthday", "This week's mixtape"];
+const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any conflicts this week?", "Who haven't I talked to lately?", "Remind me before Maya's birthday", "This week's mixtape", "Review game tape"];
 
 // The home page composer posts to /api/chat. Without gateway credentials the page answers from stored records.
+// A save or clear finishes before Kobe reads the database. The browser does not send notes.
 // A spoken turn sends only a flag; /api/chat owns the words it adds to the instructions.
 const transport = new AssistantChatTransport({
   api: "/api/chat",
   body: () => (voice.isVoiceTurn() ? { voice: true } : {}),
   fetch: async (input, init) => {
+    await flushTape();
     if (typeof init?.body !== "string") return fetch(input, init);
     try {
       const body = JSON.parse(init.body) as Record<string, unknown>;
-      return fetch(input, { ...init, body: JSON.stringify({ ...body, coaching: coachingPayload() }) });
+      delete body.coaching;
+      return fetch(input, { ...init, body: JSON.stringify(body) });
     } catch {
       return fetch(input, init);
     }
@@ -397,6 +399,7 @@ function AssistantMessage() {
               Empty: Thinking,
               tools: {
                 by_name: {
+                  show_game_tape: TapeCard,
                   show_people: PeopleCard,
                   pregame_brief: BriefCard,
                   draft_message: DraftCard,

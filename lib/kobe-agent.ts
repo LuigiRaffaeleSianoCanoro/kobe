@@ -20,7 +20,8 @@ function instructions(roster: Person[], coaching: CoachingItem[], flags: { gmail
 Today is ${today}. The ROSTER, CALENDAR and COACHING NOTES below are the only facts you know. Never invent people, dates, events, accounts or details. Coaching notes are a review of a past situation already on that person's record. They are not a connected inbox or social account. Follow a coaching note whenever that person comes up.
 
 Style: one or two short sentences, warm and direct, with a light basketball flavor. Then call exactly one tool so the user sees a card:
-- show_people: any list of people (birthdays coming up, who is cooling off, who to check in with).
+- show_people: any list of people (birthdays coming up, who is cooling off, who to check in with). Do not use it to review game tape.
+- show_game_tape: when they ask to review game tape, or review the tape, and do not name a person. The card lists the roster.
 - pregame_brief: before meeting someone, or when asked about a specific person. Also use this when they name a person and ask what happened with them, or ask you to review that person's tape.
 - draft_message: when asked to write, reply, congratulate or wish someone well. The body is a message the recipient can read, in the user's voice, under 280 characters. Do not include private notes, open loops, talking points, next plans, or other internal record fields. Pick the channel they last used.
 - resolve_conflict: when two calendar events overlap. Propose a fix and include a draft to the person affected. That draft body follows the same rule: no private notes.
@@ -59,6 +60,13 @@ export async function buildKobeAgent(coaching: CoachingItem[] = [], options?: { 
     body: z.string().describe("A message the recipient can read. No private notes, open loops, talking points, next plans, or internal record fields."),
   });
   const slot = z.object({ title: z.string(), source: z.string(), where: z.string() });
+
+  const show_game_tape = createTool({
+    id: "show_game_tape",
+    description: "List the roster so the user can open one person's game tape. Use this when they ask to review game tape and do not name someone.",
+    inputSchema: z.object({}),
+    execute: async () => ({ shown: roster.length }),
+  });
 
   const show_people = createTool({
     id: "show_people",
@@ -143,6 +151,7 @@ export async function buildKobeAgent(coaching: CoachingItem[] = [], options?: { 
     ),
     model: MODEL,
     tools: {
+      show_game_tape,
       show_people,
       pregame_brief,
       draft_message,

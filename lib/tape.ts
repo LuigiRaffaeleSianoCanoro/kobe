@@ -86,17 +86,75 @@ export function coachingBlock(roster: { id: string; name: string }[], notes: Coa
   return lines.length ? lines.join("\n") : "None yet.";
 }
 
-export function parseStoredCoaching(raw: unknown): Record<string, { note: string; at: string }> {
+export type StoredCoaching = { note: string; at: string; pending?: boolean };
+
+const EPOCH = new Date(0).toISOString();
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// The server list is the whole set after a successful read. Ids off the roster, blank notes, and oversized notes are dropped.
+export function adoptServerCoaching(rosterIds: ReadonlySet<string>, notes: readonly unknown[]): Record<string, StoredCoaching> {
+  const out: Record<string, StoredCoaching> = {};
+  for (const row of notes) {
+    if (!row || typeof row !== "object") continue;
+    const { personId, note, at } = row as { personId?: unknown; note?: unknown; at?: unknown };
+    if (typeof personId !== "string" || !rosterIds.has(personId) || typeof note !== "string") continue;
+    const cleaned = cleanNote(note);
+    if (!cleaned.ok) continue;
+    out[personId] = { note: cleaned.note, at: typeof at === "string" && at ? at : EPOCH };
+  }
+  return out;
+}
+
+// Synced local notes follow the server. A pending save or a pending clear stays until the server agrees.
+export function coachingFromServer(
+  rosterIds: ReadonlySet<string>,
+  server: readonly unknown[],
+  local: Record<string, StoredCoaching>,
+): Record<string, StoredCoaching> {
+  const next = adoptServerCoaching(rosterIds, server);
+  for (const [id, value] of Object.entries(local)) {
+    if (!value?.pending || !rosterIds.has(id)) continue;
+    if (!value.note) {
+      delete next[id];
+      next[id] = { note: "", at: value.at, pending: true };
+      continue;
+    }
+    if (next[id]?.note === value.note) continue;
+    next[id] = { note: value.note, at: value.at, pending: true };
+  }
+  return next;
+}
+
+// True when they asked to review the tape and did not name someone on the roster.
+export function isTapeListRequest(text: string, names: readonly string[]): boolean {
+  const asked = text.toLowerCase();
+  if (!/(game tape|review the tape)/.test(asked)) return false;
+  return !names.some((name) => {
+    const first = name.trim().split(/\s+/)[0]?.toLowerCase();
+    if (!first) return false;
+    return new RegExp(`\\b${escapeRegExp(first)}\\b`).test(asked);
+  });
+}
+
+export function parseStoredCoaching(raw: unknown): Record<string, StoredCoaching> {
   if (!raw || typeof raw !== "object") return {};
-  const out: Record<string, { note: string; at: string }> = {};
+  const out: Record<string, StoredCoaching> = {};
   for (const [id, value] of Object.entries(raw)) {
     if (!id || id.length > 64 || !value || typeof value !== "object") continue;
     const note = (value as { note?: unknown }).note;
     const at = (value as { at?: unknown }).at;
+    const pending = (value as { pending?: unknown }).pending === true;
     if (typeof note !== "string" || typeof at !== "string") continue;
+    if (pending && !note.trim()) {
+      out[id] = { note: "", at, pending: true };
+      continue;
+    }
     const cleaned = cleanNote(note);
     if (!cleaned.ok) continue;
-    out[id] = { note: cleaned.note, at };
+    out[id] = pending ? { note: cleaned.note, at, pending: true } : { note: cleaned.note, at };
   }
   return out;
 }

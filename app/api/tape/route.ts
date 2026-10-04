@@ -7,7 +7,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   if (!sql) return Response.json({ error: "No database configured." }, { status: 404 });
-  return Response.json({ notes: (await readCoaching()) ?? [] });
+  const notes = await readCoaching();
+  if (notes === null) return Response.json({ error: "Coaching notes could not be read." }, { status: 503 });
+  return Response.json({ notes });
 }
 
 export async function POST(req: Request) {
@@ -32,5 +34,7 @@ export async function POST(req: Request) {
     console.error("[kobe] Could not save coaching note.", error);
     return Response.json({ error: "Coaching note was not saved." }, { status: 503 });
   }
-  return Response.json({ notes: (await readCoaching()) ?? [] });
+  const notes = await readCoaching();
+  if (notes === null) return Response.json({ error: "Coaching notes could not be read." }, { status: 503 });
+  return Response.json({ notes });
 }

@@ -6,7 +6,7 @@ import { readCoaching } from "@/lib/coaching-db";
 import { USER_TEXT } from "@/lib/connectors";
 import { buildKobeAgent } from "@/lib/kobe-agent";
 import { loadRoster } from "@/lib/roster";
-import { CoachingList, mergeCoaching } from "@/lib/tape";
+import { isTapeListRequest, mergeCoaching } from "@/lib/tape";
 
 export const maxDuration = 60;
 
@@ -38,17 +38,24 @@ export async function POST(req: Request) {
   const body = parseChatRequest(raw);
   const parsed = await safeValidateUIMessages({ messages: body.messages });
   if (!parsed.success) return new Response("Invalid messages.", { status: 400 });
-  // Instructions come from the server only. Coaching is a separate field, checked against the roster.
+  // Instructions come from the server only. Browser coaching is ignored, including a stale tab's old note.
+  // A failed database read is not an empty roster of notes; this turn simply has none to add.
   const messages = withImportSummaries(parsed.data.filter((m) => m.role !== "system").slice(-MAX_MESSAGES));
-  const fromClient = CoachingList.safeParse(body.coaching).data ?? [];
   const roster = await loadRoster();
-  const saved = ((await readCoaching()) ?? []).map(({ personId, note }) => ({ personId, note }));
+  const read = await readCoaching();
+  const saved = (read ?? []).map(({ personId, note }) => ({ personId, note }));
+  const asked = lastUserText(messages);
 
   const requestContext = new RequestContext();
-  requestContext.setRaw(USER_TEXT, lastUserText(messages));
+  requestContext.setRaw(USER_TEXT, asked);
 
-  const agent = await buildKobeAgent(mergeCoaching(new Set(roster.map((person) => person.id)), saved, fromClient), { voice: body.voice });
-  const stream = await agent.stream(messages, { maxSteps: 3, requestContext });
+  const agent = await buildKobeAgent(mergeCoaching(new Set(roster.map((person) => person.id)), saved, []), { voice: body.voice });
+  const listTheTape = isTapeListRequest(asked, roster.map((person) => person.name));
+  const stream = await agent.stream(messages, {
+    maxSteps: listTheTape ? 1 : 3,
+    requestContext,
+    ...(listTheTape ? { toolChoice: { type: "tool" as const, toolName: "show_game_tape" } } : {}),
+  });
 
   const ui = createUIMessageStream({
     originalMessages: messages,

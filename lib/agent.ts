@@ -52,7 +52,8 @@ export function scriptedReply(input: string): Reply {
   if (plan) return { text: plan.text };
 
   const t = input.toLowerCase();
-  if (/(game tape|review the tape|\bcoach\b)/.test(t)) {
+  // Naming "coach" alone does not open the tape. "Review game tape" does.
+  if (/(game tape|review the tape)/.test(t)) {
     const id = mentioned(t);
     if (!id) {
       return {

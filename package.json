@@ -7,7 +7,8 @@
     "dev:vite": "vite",
     "build": "next build",
     "start": "next start",
-    "test": "node --experimental-strip-types --test src/agent.test.ts lib/access.test.ts server/server-env.test.ts"
+    "test": "vitest run && node --experimental-strip-types --test src/agent.test.ts lib/access.test.ts server/server-env.test.ts",
+    "import:whatsapp": "tsx --env-file-if-exists=.env.local scripts/import-whatsapp.ts"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.15.23",
@@ -18,6 +19,7 @@
     "@paper-design/shaders-react": "^0.0.81",
     "ai": "^7.0.127",
     "clsx": "^2.1.1",
+    "fflate": "^0.8.3",
     "lucide-react": "^1.52.0",
     "motion": "^14.0.0",
     "next": "16.3.8",
@@ -33,8 +35,10 @@
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.1.1",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5",
-    "vite": "^8.3.2"
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
   },
   "packageManager": "pnpm@10.18.1"
 }

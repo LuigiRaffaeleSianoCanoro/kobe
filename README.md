@@ -9,9 +9,9 @@ Built for the Build Personal Agents Hack. MIT licensed, every dependency is open
 The home page is the courtside chat, the season meters, and the roster.
 
 - **Chat with Kobe** built on [assistant-ui](https://www.assistant-ui.com) primitives. Replies stream in and render tool calls as cards: people lists, pregame briefs, message drafts, and schedule conflicts.
-- **Live agent (optional).** With Neon AI Gateway credentials, the composer sends the thread to `/api/chat`, which runs a [Mastra](https://mastra.ai) agent over your roster. Without them, a scripted offline agent answers a few questions with the same cards. The header says which one is running.
+- **Live agent.** With Neon AI Gateway credentials, the composer sends the thread to `/api/chat`, which runs a [Mastra](https://mastra.ai) agent over your roster.
 - **Roster.** Roster lists everyone Kobe knows. Add person creates a record, and Edit record changes it. Empty fields stay empty. With `DATABASE_URL`, that write goes to Postgres, so the live agent and the season log see the same person. Without a database, the roster stays in this browser.
-- **Message drafts you send yourself.** Kobe cannot send messages. "Copy for Instagram" copies the draft and logs the touch on that person's record. With Postgres, the draft text is stored with it and their rapport goes up. If the person is not in the database, the log is rolled back and the page says it was not saved.
+- **Message drafts you send yourself.** Kobe cannot send messages. "Copy for Instagram" copies the draft and logs the touch on that person's record. With Postgres, the draft text is stored with it and their rapport goes up. If the database rejects the save, the page says it was not saved.
 - **Season mode.** XP, levels (Rookie → Mamba), a streak of consecutive active days, assists for every draft you log, and a three-play game plan per day. The meters sit in the header from 1024px up and follow the header when it wraps.
 - **Scouting reports** per person with a rapport score that rises as you keep in touch.
 - **Postgres (optional).** The roster and season stats persist in Postgres. Without a database, season stats stay in memory for the session and the roster stays in the browser.
@@ -47,11 +47,28 @@ NEON_AI_GATEWAY_BASE_URL="https://<branch>-api.ai.<cell>.<region>.aws.neon.tech"
 KOBE_MODEL="neon/gpt-oss-120b"
 ```
 
+`pnpm dev` is the Next app. Its chat stays on `/api/chat`. `pnpm dev:vite` is the Vite court. It reads the gateway token, base URL, model, and `KOBE_PASSWORD` from that same `.env.local` inside the Node process. The browser bundle does not receive the token.
+
 Then load the schema. It is safe to re-run after pulling changes:
 
 ```bash
 psql "$DATABASE_URL" -f db/schema.sql
 ```
+
+## Import a WhatsApp chat
+
+With Postgres set up, Kobe can store a WhatsApp chat on the matching person's record. Export the chat without media and keep the file name WhatsApp gives it:
+
+- **iPhone:** open the chat, tap the name at the top, then Export Chat → Without Media. You get a `.zip`.
+- **Android:** open the chat, then ⋮ → More → Export chat → Without media. You get a `.txt`.
+
+```bash
+pnpm import:whatsapp "WhatsApp Chat - Valentina Ríos.zip"
+```
+
+It prints how many messages it stored, for whom, and the date range. Importing the same export again stores nothing new. A 1:1 chat goes onto the person with that name, and if nobody matches, Kobe adds them as "New from WhatsApp" for you to review. In a group chat, only senders already in your people are linked.
+
+Set `KOBE_OWNER_NAME` in `.env.local` to your name as WhatsApp shows it, or pass `--owner "Your Name"`, so your own messages are marked as yours. Times are read as `America/Argentina/Buenos_Aires` unless you set `KOBE_TIME_ZONE` or pass `--tz`. Photos and other media are not imported.
 
 ## Access
 

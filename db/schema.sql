@@ -14,6 +14,7 @@ create table if not exists people (
   open_loop   text,
   sources     text[] not null default '{}'
 );
+alter table people add column if not exists needs_review boolean not null default false;
 
 create table if not exists season (
   id          text primary key default 'me',
@@ -40,6 +41,36 @@ create table if not exists plays (
   play_id text not null,
   primary key (day, play_id)
 );
+
+create table if not exists imports (
+  id            bigserial primary key,
+  source        text not null default 'WHATSAPP',
+  file_name     text not null,
+  chat_name     text not null,
+  is_group      boolean not null,
+  owner_name    text,
+  status        text not null default 'done',
+  message_count int not null,
+  stored_count  int not null,
+  first_at      timestamptz,
+  last_at       timestamptz,
+  created_at    timestamptz not null default now()
+);
+
+create table if not exists messages (
+  id           bigserial primary key,
+  person_id    text references people(id) on delete cascade,
+  chat_name    text not null,
+  sender       text not null,
+  from_owner   boolean not null,
+  sent_at      timestamptz not null,
+  body         text not null,
+  kind         text not null default 'text',
+  source       text not null default 'WHATSAPP',
+  import_id    bigint not null references imports(id) on delete cascade,
+  content_hash text not null unique
+);
+create index if not exists messages_person_sent_idx on messages (person_id, sent_at desc);
 
 insert into season (id, xp, assists, streak, last_active) values ('me', 180, 12, 6, current_date - 1)
 on conflict (id) do nothing;

@@ -64,6 +64,7 @@ const markActive = (s: GameState) => (s.activeToday ? {} : { streak: s.streak + 
 let persisted = false;
 let queue = Promise.resolve();
 let inflight = 0;
+const saving = new Set<string>();
 
 async function request(event?: SeasonEvent): Promise<Season> {
   const res = await fetch(
@@ -87,7 +88,7 @@ function applySeason(d: Season) {
 
 // Requests run one at a time and only the last response is applied. A read that started before
 // an award can't roll it back, because the award's own write answers after it.
-function sync(event?: SeasonEvent, onFail?: () => void) {
+function sync(event?: SeasonEvent, onFail?: () => void, onOk?: () => void) {
   if (!persisted) return;
   inflight++;
   queue = queue.then(async () => {
@@ -99,6 +100,7 @@ function sync(event?: SeasonEvent, onFail?: () => void) {
       if (event) sync();
       return;
     }
+    onOk?.();
     if (inflight === 0) applySeason(season);
   });
 }
@@ -154,38 +156,44 @@ export const game = {
   },
 
   // Kobe can't send messages. The user copies the draft, sends it themselves, and this logs the assist.
+  // With a database, "Logged" appears only after /api/season accepts the write.
   logDraft(key: string, { personId, to, channel, body, copied }: LoggedDraft) {
-    if (state.logged[key]) return;
-    const before = personId ? state.people[personId] : undefined;
-    const startsDay = !state.activeToday;
-    set((s) => ({
-      logged: { ...s.logged, [key]: true },
-      assists: s.assists + 1,
-      ...markActive(s),
-      people: before ? { ...s.people, [before.id]: { ...before, rapport: Math.min(99, before.rapport + 3), last: `${channel} · just now` } } : s.people,
-    }));
-    game.award(ASSIST_XP, "ASSIST");
-    const logged = game.pushAlert({
-      at: 0,
-      kind: "ASSIST",
-      source: channel.toUpperCase(),
-      color: "#3DBE8B",
-      title: copied ? `Draft for ${to} copied` : `Logged your message to ${to}`,
-      body: copied ? `Paste it into ${channel} to send it. Logged to their record.` : "Logged to their record.",
-      auto: true,
-    });
-    sync({ type: "assist", personId, channel, body }, () => {
-      game.dismiss(logged);
+    if (state.logged[key] || saving.has(key)) return;
+    saving.add(key);
+    const accept = () => {
+      saving.delete(key);
+      if (state.logged[key]) return;
+      const before = personId ? state.people[personId] : undefined;
       set((s) => ({
-        logged: { ...s.logged, [key]: false },
-        xp: s.xp - ASSIST_XP,
-        assists: s.assists - 1,
-        people: before ? { ...s.people, [before.id]: before } : s.people,
-        ...(startsDay ? { streak: s.streak - 1, activeToday: false } : {}),
+        logged: { ...s.logged, [key]: true },
+        assists: s.assists + 1,
+        ...markActive(s),
+        people: before ? { ...s.people, [before.id]: { ...before, rapport: Math.min(99, before.rapport + 3), last: `${channel} · just now` } } : s.people,
       }));
-      game.pushAlert({ at: 0, kind: "NOT SAVED", source: "SEASON", color: "#E5484D", title: `Couldn't log your message to ${to}`, body: "Their record was not updated. Try again in a moment.", auto: true });
-    });
-    if (personId === "maya" || personId === "dev") game.completePlay(personId);
+      game.award(ASSIST_XP, "ASSIST");
+      game.pushAlert({
+        at: 0,
+        kind: "ASSIST",
+        source: channel.toUpperCase(),
+        color: "#3DBE8B",
+        title: copied ? `Draft for ${to} copied` : `Logged your message to ${to}`,
+        body: copied ? `Paste it into ${channel} to send it. Logged to their record.` : "Logged to their record.",
+        auto: true,
+      });
+      if (personId === "maya" || personId === "dev") game.completePlay(personId);
+    };
+    if (!persisted) {
+      accept();
+      return;
+    }
+    sync(
+      { type: "assist", personId, channel, body },
+      () => {
+        saving.delete(key);
+        game.pushAlert({ at: 0, kind: "NOT SAVED", source: "SEASON", color: "#E5484D", title: `Couldn't log your message to ${to}`, body: "Their record was not updated. Try again in a moment.", auto: true });
+      },
+      accept,
+    );
   },
 
   openRecord: (record: string | null) => set({ record }),

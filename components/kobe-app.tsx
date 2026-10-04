@@ -2,19 +2,23 @@
 
 import {
   AssistantRuntimeProvider,
+  AuiIf,
   ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
+  useAuiState,
   useLocalRuntime,
   type AssistantRuntime,
 } from "@assistant-ui/react";
 import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
 import { Dithering } from "@paper-design/shaders-react";
+import { Mic, Square } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
 import { CHANNELS, ENGINE, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
 import { game, registerAsk, useGame } from "@/lib/game";
+import { LANG_NAMES, dictation, useHydrated, useVoice, voice } from "@/lib/voice";
 import { CourtShader } from "./court-shader";
 import { BriefCard, ConflictCard, DraftCard, PeopleCard } from "./tool-cards";
 
@@ -23,6 +27,7 @@ const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any confl
 
 // Live: Mastra agent on the Neon AI Gateway via /api/chat. Offline: scripted local agent.
 const transport = new AssistantChatTransport({ api: "/api/chat" });
+const adapters = { dictation };
 
 type Wiring = { roster: Person[]; persisted: boolean };
 
@@ -35,13 +40,13 @@ function useWire(runtime: AssistantRuntime, { roster, persisted }: Wiring) {
 }
 
 function LiveKobe({ model, ...wiring }: Wiring & { model: string }) {
-  const runtime = useChatRuntime({ transport });
+  const runtime = useChatRuntime({ transport, adapters });
   useWire(runtime, wiring);
   return <Court runtime={runtime} engine={`LIVE AGENT · ${model.replace(/^neon\//, "").toUpperCase()} · SAMPLE FEED & CALENDAR`} />;
 }
 
 function ScriptedKobe(wiring: Wiring) {
-  const runtime = useLocalRuntime(kobeAdapter);
+  const runtime = useLocalRuntime(kobeAdapter, { adapters });
   useWire(runtime, wiring);
   return <Court runtime={runtime} engine="OFFLINE DEMO · SCRIPTED AGENT · SAMPLE DATA" />;
 }
@@ -369,6 +374,7 @@ function Composer() {
 
   return (
     <div className="fixed right-0 bottom-[22px] left-0 z-10 px-4 min-[1000px]:right-[380px]">
+      <VoiceNotice />
       <ComposerPrimitive.Root className="glass mx-auto flex max-w-[720px] items-center gap-2.5 rounded-full py-2 pr-2 pl-5 shadow-[0_24px_60px_rgba(0,0,0,.5)]">
         <ComposerPrimitive.Input
           ref={input}
@@ -378,12 +384,97 @@ function Composer() {
           aria-label={PLACEHOLDER}
           className="h-10 min-w-0 flex-1 resize-none bg-transparent py-2.5 text-[15.5px] text-chalk outline-none placeholder:text-chalk-3"
         />
+        <Dictation />
         <ComposerPrimitive.Send asChild>
           <button title="Send" className="ball flex-none rounded-full shadow-[0_6px_18px_rgba(224,113,42,.45)] disabled:opacity-60">
             <Ball size={46} line={2} />
           </button>
         </ComposerPrimitive.Send>
       </ComposerPrimitive.Root>
+    </div>
+  );
+}
+
+// Push-to-talk. Hidden until hydration and in browsers without Web Speech.
+function Dictation() {
+  const hydrated = useHydrated();
+  const lang = useVoice((s) => s.lang);
+  const listening = useAuiState((s) => s.composer.dictation != null);
+  const [local, setLocal] = useState(false);
+  const refocus = useRef(false);
+  useEffect(() => {
+    let live = true;
+    dictation?.prepare().then(() => live && setLocal(!!dictation?.isLocal()));
+    return () => {
+      live = false;
+    };
+  }, [lang]);
+  if (!hydrated || !dictation) return null;
+
+  // Starting or stopping swaps the button. Keep keyboard focus on whichever one is showing.
+  const handoff = {
+    onClick: (e: MouseEvent<HTMLButtonElement>) => {
+      refocus.current = document.activeElement === e.currentTarget;
+      voice.notify(null);
+    },
+    ref: (el: HTMLButtonElement | null) => {
+      if (el && refocus.current && el !== document.activeElement) {
+        refocus.current = false;
+        el.focus();
+      }
+    },
+  };
+  const other = lang === "es" ? "en" : "es";
+  const dictate = `Dictate in ${LANG_NAMES[lang]}${local ? ", on this device" : ""}`;
+  return (
+    <>
+      <button
+        type="button"
+        disabled={listening}
+        onClick={() => voice.setLang(other)}
+        title={`Dictation language: ${LANG_NAMES[lang]}. Switch to ${LANG_NAMES[other]}`}
+        aria-label={`Dictation language: ${LANG_NAMES[lang]}. Switch to ${LANG_NAMES[other]}`}
+        className="label press h-8 min-w-8 flex-none rounded-full px-1.5 text-chalk-3 hover:text-gold disabled:opacity-40"
+      >
+        {lang}
+      </button>
+      <AuiIf condition={(s) => s.composer.dictation == null}>
+        <ComposerPrimitive.Dictate asChild>
+          <button {...handoff} title={dictate} aria-label={dictate} className="mic glass press grid h-10 w-10 flex-none place-items-center rounded-full text-chalk-2">
+            <Mic size={18} aria-hidden />
+          </button>
+        </ComposerPrimitive.Dictate>
+      </AuiIf>
+      <AuiIf condition={(s) => s.composer.dictation != null}>
+        <ComposerPrimitive.StopDictation asChild>
+          <button {...handoff} title="Stop dictation" aria-label="Stop dictation" className="listening press grid h-10 w-10 flex-none place-items-center rounded-full bg-gold text-ink">
+            <Square size={13} fill="currentColor" aria-hidden />
+          </button>
+        </ComposerPrimitive.StopDictation>
+      </AuiIf>
+    </>
+  );
+}
+
+function VoiceNotice() {
+  const notice = useVoice((s) => s.notice);
+  const reduce = useReducedMotion();
+  return (
+    <div role="status" aria-live="polite" className="mx-auto flex max-w-[720px] justify-center">
+      <AnimatePresence>
+        {notice && (
+          <motion.div
+            key={notice}
+            initial={{ opacity: 0, transform: reduce ? "none" : "translateY(6px)" }}
+            animate={{ opacity: 1, transform: "translateY(0px)" }}
+            exit={{ opacity: 0, transition: { duration: 0.15 } }}
+            transition={{ duration: 0.25, ease: EASE_OUT }}
+            className="glass mb-2 rounded-full px-4 py-2 text-center text-[13px] leading-snug text-chalk-2 [text-wrap:pretty]"
+          >
+            {notice}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -3,14 +3,14 @@
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
-import { RECORDS, type RecordId } from "@/lib/data";
+import { isDraftChannel } from "@/lib/data";
 import { game, useGame } from "@/lib/game";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 
 // Tool args stream in as partial JSON from the model, so every field is optional here.
 type Partial<T> = { [K in keyof T]?: T[K] };
-const nameOf = (id?: string) => (id && id in RECORDS ? RECORDS[id as RecordId].name : (id ?? ""));
+const usePerson = (id?: string) => useGame((s) => (id ? s.people[id] : undefined));
 
 function CardIn({ children, className }: { children: ReactNode; className?: string }) {
   const reduce = useReducedMotion();
@@ -36,7 +36,7 @@ type Person = { id: string; meta: string; right: string };
 
 export function PeopleCard({ args }: ToolCallMessagePartProps) {
   const { title, people } = args as Partial<{ title: string; people: Partial<Person>[] }>;
-  const rapport = useGame((s) => s.rapport);
+  const roster = useGame((s) => s.people);
   const rows = (people ?? []).filter((p): p is Person => !!p?.id);
   return (
     <CardIn className="glass overflow-hidden rounded-2xl">
@@ -45,21 +45,23 @@ export function PeopleCard({ args }: ToolCallMessagePartProps) {
         <span className="text-chalk-3">RAPPORT</span>
       </div>
       {rows.map((p, i) => {
-        const score = rapport[p.id as RecordId] ?? 50;
+        const person = roster[p.id];
+        const name = person?.name ?? p.id;
+        const score = person?.rapport ?? 50;
         return (
           <motion.button
             key={p.id}
-            onClick={() => p.id in RECORDS && game.openRecord(p.id as RecordId)}
+            onClick={() => person && game.openRecord(p.id)}
             initial={{ opacity: 0, transform: "translateY(6px)" }}
             animate={{ opacity: 1, transform: "translateY(0px)" }}
             transition={{ duration: 0.3, ease: EASE_OUT, delay: 0.08 + i * 0.05 }}
             className="row press flex w-full items-center gap-3 border-t border-white/[.06] px-4 py-3 text-left"
           >
             <span className="display grid h-9 w-9 flex-none place-items-center rounded-full bg-gold/15 text-[15px] text-gold">
-              {nameOf(p.id).split(" ").map((w) => w[0]).join("")}
+              {name.split(" ").map((w) => w[0]).join("")}
             </span>
             <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="text-[14.5px] font-semibold">{nameOf(p.id)}</span>
+              <span className="text-[14.5px] font-semibold">{name}</span>
               <span className="text-[12.5px] text-[#BDB5AA]">{p.meta}</span>
             </span>
             <span className="hidden w-20 flex-col items-end gap-1 sm:flex">
@@ -90,9 +92,9 @@ export function PeopleCard({ args }: ToolCallMessagePartProps) {
 type Brief = { name: string; next: string; points: string[]; loop: string };
 
 export function BriefCard({ args, result }: ToolCallMessagePartProps) {
-  const { recordId } = args as Partial<{ recordId: RecordId }>;
-  const seed = recordId && recordId in RECORDS ? RECORDS[recordId] : null;
-  const b = (result as Brief | undefined)?.name ? (result as Brief) : seed;
+  const { recordId } = args as Partial<{ recordId: string }>;
+  const person = usePerson(recordId);
+  const b = (result as Brief | undefined)?.name ? (result as Brief) : person;
 
   useEffect(() => {
     if (recordId === "marcus") game.completePlay("marcus");
@@ -116,8 +118,8 @@ export function BriefCard({ args, result }: ToolCallMessagePartProps) {
             ))}
           </div>
           <div className="rounded-[10px] bg-gold/10 px-3 py-2.5 text-[13.5px] text-[#F4E3BC]">Open loop: {b.loop}</div>
-          {recordId && recordId in RECORDS && (
-            <button onClick={() => game.openRecord(recordId)} className="press self-start rounded-full bg-chalk px-3.5 py-2 text-[12.5px] font-bold text-ink">
+          {person && (
+            <button onClick={() => game.openRecord(person.id)} className="press self-start rounded-full bg-chalk px-3.5 py-2 text-[12.5px] font-bold text-ink">
               Full scouting report
             </button>
           )}
@@ -135,13 +137,20 @@ export function BriefCard({ args, result }: ToolCallMessagePartProps) {
 
 type Draft = { recordId: string; channel: string; body: string };
 
-function DraftBody({ draft, sendKey, ready }: { draft: Partial<Draft>; sendKey: string; ready: boolean }) {
-  const sent = useGame((s) => !!s.sent[sendKey]);
+function DraftBody({ draft, logKey, ready }: { draft: Partial<Draft>; logKey: string; ready: boolean }) {
+  const logged = useGame((s) => !!s.logged[logKey]);
+  const person = usePerson(draft.recordId);
   const [edited, setEdited] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const body = edited ?? draft.body ?? "";
-  const to = nameOf(draft.recordId);
-  const recordId = draft.recordId && draft.recordId in RECORDS ? (draft.recordId as RecordId) : undefined;
+  const to = person?.name ?? draft.recordId ?? "";
+  const channel = isDraftChannel(draft.channel) ? draft.channel : undefined;
+
+  const copyAndLog = async () => {
+    if (!channel) return;
+    const copied = (await navigator.clipboard?.writeText(body).then(() => true, () => false)) ?? false;
+    game.logDraft(logKey, { personId: person?.id, to, channel, body, copied });
+  };
   return (
     <>
       <div className="label flex items-center gap-2 text-[#BDB5AA]">
@@ -163,23 +172,23 @@ function DraftBody({ draft, sendKey, ready }: { draft: Partial<Draft>; sendKey: 
           {!ready && <span className="ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 animate-pulse bg-gold" />}
         </p>
       )}
-      {sent ? (
+      {logged ? (
         <motion.div
           initial={{ opacity: 0, transform: "translateY(4px)" }}
           animate={{ opacity: 1, transform: "translateY(0px)" }}
           transition={{ duration: 0.25, ease: EASE_OUT }}
           className="label text-green"
         >
-          ✓ SENT · ASSIST LOGGED · RAPPORT +3
+          ✓ ASSIST LOGGED{person ? " · RAPPORT +3" : ""}
         </motion.div>
       ) : (
         <div className="flex gap-2">
           <button
-            disabled={!ready || !body}
-            onClick={() => game.sendDraft(sendKey, recordId, to, draft.channel ?? "Message")}
+            disabled={!ready || !body || !channel}
+            onClick={copyAndLog}
             className="press rounded-full bg-gold px-3.5 py-2 text-[12.5px] font-bold text-ink disabled:opacity-50"
           >
-            Send via {draft.channel ?? "…"}
+            Copy for {draft.channel ?? "…"}
           </button>
           <button disabled={!ready} onClick={() => setEditing((e) => !e)} className="press rounded-full border border-white/15 px-3.5 py-2 text-[12.5px] disabled:opacity-50">
             {editing ? "Done" : "Edit"}
@@ -193,7 +202,7 @@ function DraftBody({ draft, sendKey, ready }: { draft: Partial<Draft>; sendKey: 
 export function DraftCard({ args, toolCallId, status }: ToolCallMessagePartProps) {
   return (
     <CardIn className="glass flex flex-col gap-3 rounded-2xl p-4">
-      <DraftBody draft={args as Partial<Draft>} sendKey={toolCallId} ready={status.type !== "running"} />
+      <DraftBody draft={args as Partial<Draft>} logKey={toolCallId} ready={status.type !== "running"} />
     </CardIn>
   );
 }
@@ -220,7 +229,7 @@ export function ConflictCard({ args, toolCallId, status }: ToolCallMessagePartPr
         )).flatMap((el, i) => (i === 0 ? [el, <span key="vs" className="display self-center text-[22px] text-red">VS</span>] : [el]))}
       </div>
       <div className="h-px bg-white/10" />
-      <DraftBody draft={c.draft ?? {}} sendKey={toolCallId} ready={status.type !== "running"} />
+      <DraftBody draft={c.draft ?? {}} logKey={toolCallId} ready={status.type !== "running"} />
     </CardIn>
   );
 }

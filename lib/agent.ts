@@ -1,6 +1,5 @@
 import type { ChatModelAdapter, ThreadMessage } from "@assistant-ui/react";
 import type { RecordId } from "./data";
-import { game } from "./game";
 
 type ToolCall = { toolName: string; args: Record<string, unknown> };
 type Reply = { text: string; tool?: ToolCall };
@@ -43,14 +42,13 @@ function reply(input: string): Reply {
       tool: { toolName: "show_people", args: { title: "BIRTHDAYS · NEXT 10 DAYS", people: [person("maya", "College roommate · Instagram", "TOMORROW"), person("jordan", "Rec league · Partiful", "OCT 9"), person("priya", "Ex-colleague · LinkedIn", "OCT 13")] } },
     };
   if (/(marcus|brief|coffee|pregame)/.test(t))
-    return { text: "Here's your pregame for 3:30. Pulled from your Sep 12 Fathom call and Gmail.", tool: { toolName: "pregame_brief", args: { recordId: "marcus" } } };
+    return { text: "Here's your pregame for the 3:30 coffee.", tool: { toolName: "pregame_brief", args: { recordId: "marcus" } } };
   if (/(lately|haven|talk|lost touch|catch up|check in)/.test(t))
     return {
       text: "These people are cooling off. One touch each keeps them in the rotation.",
       tool: { toolName: "show_people", args: { title: "COOLING OFF", people: [person("dev", "Unanswered WhatsApp", "9 DAYS"), person("priya", "Last LinkedIn like", "2 MO"), person("maya", "Last Instagram DM", "6 WK")] } },
     };
-  const connected = Object.entries(game.get().sources).filter(([, on]) => on).length;
-  return { text: `I checked your ${connected} connected sources and found nothing new on that. Connect more in Integrations to widen what I can see.` };
+  return { text: "This offline demo only knows the sample roster and a few scripted questions. Try one of the suggestions above." };
 }
 
 const sleep = (ms: number, signal: AbortSignal) =>
@@ -67,8 +65,7 @@ function lastUserText(messages: readonly ThreadMessage[]) {
   return last?.content.map((p) => (p.type === "text" ? p.text : "")).join(" ") ?? "";
 }
 
-// Local scripted agent: streams text, then a tool call whose result renders as a card.
-// Swap for a Mastra/AI SDK backend by replacing this adapter.
+// Offline stand-in for /api/chat: streams scripted text, then a tool call whose result renders as a card.
 export const kobeAdapter: ChatModelAdapter = {
   async *run({ messages, abortSignal }) {
     const r = reply(lastUserText(messages));

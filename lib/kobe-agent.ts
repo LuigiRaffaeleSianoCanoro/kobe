@@ -1,15 +1,14 @@
 import { Agent } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-import { CALENDAR, loadRoster, type RosterEntry } from "./roster";
+import { DRAFT_CHANNELS, type Person } from "./data";
+import { SAMPLE_CALENDAR, loadRoster } from "./roster";
 
 // Any model in the Neon AI Gateway catalog works. The default is open-weight, so the same
 // agent can later point at a self-hosted OpenAI-compatible server running the same model.
 const MODEL = process.env.KOBE_MODEL ?? "neon/gpt-oss-120b";
 
-const CHANNELS = ["Instagram", "WhatsApp", "LinkedIn", "SMS", "Email"] as const;
-
-function instructions(roster: RosterEntry[]) {
+function instructions(roster: Person[]) {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   return `You are Kobe, a personal relationship agent. Mamba mentality applied to the people who matter: show up prepared and never miss the small things.
 
@@ -20,22 +19,23 @@ Style: one or two short sentences, warm and direct, with a light basketball flav
 - pregame_brief: before meeting someone, or when asked about a specific person.
 - draft_message: when asked to write, reply, congratulate or wish someone well. Write the body in the user's own voice, specific to that person's details, under 280 characters. Pick the channel they last used.
 - resolve_conflict: when two calendar events overlap. Propose a fix and include a draft to the person affected.
-Never say a message was sent; the user sends it from the card. After a tool returns, do not repeat what the card shows.
+You cannot send messages. Never say a message was sent; the user copies the draft from the card and sends it themselves. After a tool returns, do not repeat what the card shows.
 
 ROSTER:
 ${JSON.stringify(roster)}
 
 CALENDAR:
-${JSON.stringify(CALENDAR)}`;
+${JSON.stringify(SAMPLE_CALENDAR)}`;
 }
 
 export async function buildKobeAgent() {
   const roster = await loadRoster();
-  const ids = roster.map((r) => r.id) as [string, ...string[]];
-  const personId = z.enum(ids);
+  const [first, ...rest] = roster.map((r) => r.id);
+  if (!first) throw new Error("Kobe needs at least one person in the roster.");
+  const personId = z.enum([first, ...rest]);
   const draft = z.object({
     recordId: personId,
-    channel: z.enum(CHANNELS),
+    channel: z.enum(DRAFT_CHANNELS),
     body: z.string().describe("The message, in the user's voice"),
   });
   const slot = z.object({ title: z.string(), source: z.string(), where: z.string() });
@@ -71,7 +71,7 @@ export async function buildKobeAgent() {
 
   const draft_message = createTool({
     id: "draft_message",
-    description: "Show a message draft card the user can edit and send.",
+    description: "Show a message draft card the user can edit, copy and send themselves.",
     inputSchema: draft,
     execute: async ({ recordId }) => ({ to: roster.find((r) => r.id === recordId)!.name, status: "awaiting user" }),
   });

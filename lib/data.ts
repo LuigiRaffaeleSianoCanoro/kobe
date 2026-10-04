@@ -1,5 +1,20 @@
 export type RecordId = "maya" | "marcus" | "jordan" | "priya" | "dev";
 
+// One person as the agent and every card see them, whether read from Postgres or the seed below.
+export type Person = {
+  id: string;
+  name: string;
+  role: string;
+  tier: string;
+  birthday: string;
+  last: string;
+  next: string;
+  points: string[];
+  loop: string;
+  sources: string[];
+  rapport: number;
+};
+
 export type PersonRecord = {
   name: string;
   role: string;
@@ -88,6 +103,24 @@ export const RECORDS: Record<RecordId, PersonRecord> = {
   },
 };
 
+export const SEED_ROSTER: Person[] = Object.entries(RECORDS).map(([id, r]) => ({
+  id,
+  name: r.name,
+  role: r.role,
+  tier: r.tier,
+  birthday: r.birthday,
+  last: r.last,
+  next: r.next,
+  points: r.points,
+  loop: r.loop,
+  sources: r.sources,
+  rapport: r.score,
+}));
+
+export const DRAFT_CHANNELS = ["Instagram", "WhatsApp", "LinkedIn", "SMS", "Email"] as const;
+export type DraftChannel = (typeof DRAFT_CHANNELS)[number];
+export const isDraftChannel = (c: unknown): c is DraftChannel => DRAFT_CHANNELS.includes(c as DraftChannel);
+
 export type FeedItem = {
   at: number;
   kind: string;
@@ -132,7 +165,6 @@ export const SOURCE_GROUPS: { name: string; items: SourceItem[] }[] = [
     items: [
       { id: "gmail", name: "Gmail", mono: "GM", desc: "Threads and contacts" },
       { id: "gcal", name: "Google Calendar", mono: "GC", desc: "Events and invites" },
-      { id: "agentmail", name: "AgentMail", mono: "AM", desc: "kobe@agentmail.to · forward anything" },
     ],
   },
   {
@@ -146,21 +178,22 @@ export const SOURCE_GROUPS: { name: string; items: SourceItem[] }[] = [
 
 export const ENGINE = [
   { name: "assistant-ui", job: "Chat runtime + tool cards" },
-  { name: "Mastra", job: "Agent loop + memory" },
-  { name: "Neon", job: "Records in Postgres" },
-  { name: "Exa", job: "Life updates from the web" },
-  { name: "Kernel", job: "Browser for socials w/o API" },
-  { name: "AgentMail", job: "Kobe's own inbox" },
+  { name: "Mastra", job: "Agent loop + tools" },
+  { name: "Neon AI Gateway", job: "Model in live mode" },
+  { name: "Postgres", job: "Roster + season stats" },
 ];
 
 export const CHANNELS = [
-  { id: "telegram", name: "Telegram", mono: "TG", handle: "@KobeAgentBot" },
-  { id: "whatsapp", name: "WhatsApp", mono: "WA", handle: "+1 415 555 0142" },
-  { id: "slack", name: "Slack", mono: "SL", handle: "Add to workspace" },
-  { id: "discord", name: "Discord", mono: "DC", handle: "/kobe brief @name" },
+  { id: "telegram", name: "Telegram", mono: "TG", desc: "Chat with Kobe in a DM" },
+  { id: "whatsapp", name: "WhatsApp", mono: "WA", desc: "Briefs and nudges by message" },
+  { id: "slack", name: "Slack", mono: "SL", desc: "/kobe in your workspace" },
+  { id: "discord", name: "Discord", mono: "DC", desc: "/kobe brief @name" },
 ];
 
-export type PlayId = "maya" | "marcus" | "dev";
+export const ASSIST_XP = 15;
+
+export const PLAY_IDS = ["maya", "marcus", "dev"] as const;
+export type PlayId = (typeof PLAY_IDS)[number];
 
 export const PLAYS: { id: PlayId; label: string; xp: number }[] = [
   { id: "maya", label: "Wish Maya a happy birthday", xp: 35 },

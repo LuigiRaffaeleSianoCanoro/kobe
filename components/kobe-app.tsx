@@ -13,7 +13,7 @@ import { Dithering } from "@paper-design/shaders-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
-import { CHANNELS, ENGINE, PLAYS, RECORDS, SOURCE_GROUPS, levelFor } from "@/lib/data";
+import { CHANNELS, ENGINE, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
 import { game, registerAsk, useGame } from "@/lib/game";
 import { CourtShader } from "./court-shader";
 import { BriefCard, ConflictCard, DraftCard, PeopleCard } from "./tool-cards";
@@ -24,34 +24,36 @@ const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any confl
 // Live: Mastra agent on the Neon AI Gateway via /api/chat. Offline: scripted local agent.
 const transport = new AssistantChatTransport({ api: "/api/chat" });
 
-function useWire(runtime: AssistantRuntime) {
+type Wiring = { roster: Person[]; persisted: boolean };
+
+function useWire(runtime: AssistantRuntime, { roster, persisted }: Wiring) {
   useEffect(() => {
     registerAsk((text) => runtime.thread.append({ role: "user", content: [{ type: "text", text }] }));
-    game.hydrate();
+    game.load(roster, persisted);
     return game.startFeed();
-  }, [runtime]);
+  }, [runtime, roster, persisted]);
 }
 
-function LiveKobe({ model }: { model: string }) {
+function LiveKobe({ model, ...wiring }: Wiring & { model: string }) {
   const runtime = useChatRuntime({ transport });
-  useWire(runtime);
-  return <Court runtime={runtime} engine={`LIVE · NEON AI GATEWAY · ${model.replace(/^neon\//, "").toUpperCase()}`} />;
+  useWire(runtime, wiring);
+  return <Court runtime={runtime} engine={`LIVE AGENT · ${model.replace(/^neon\//, "").toUpperCase()} · SAMPLE FEED & CALENDAR`} />;
 }
 
-function ScriptedKobe() {
+function ScriptedKobe(wiring: Wiring) {
   const runtime = useLocalRuntime(kobeAdapter);
-  useWire(runtime);
-  return <Court runtime={runtime} engine="OFFLINE DEMO · SCRIPTED AGENT" />;
+  useWire(runtime, wiring);
+  return <Court runtime={runtime} engine="OFFLINE DEMO · SCRIPTED AGENT · SAMPLE DATA" />;
 }
 
-export function KobeApp({ live, model }: { live: boolean; model: string }) {
-  return live ? <LiveKobe model={model} /> : <ScriptedKobe />;
+export function KobeApp({ live, model, ...wiring }: Wiring & { live: boolean; model: string }) {
+  return live ? <LiveKobe model={model} {...wiring} /> : <ScriptedKobe {...wiring} />;
 }
 
 function Court({ runtime, engine }: { runtime: AssistantRuntime; engine: string }) {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <span className="label pointer-events-none fixed top-[64px] left-5 z-20 text-[9.5px] text-chalk-3">{engine}</span>
+      <span className="label pointer-events-none fixed top-[64px] right-5 left-5 z-20 truncate text-[9.5px] text-chalk-3">{engine}</span>
       <CourtShader />
       <div className="grain" aria-hidden />
       <Header />
@@ -86,10 +88,6 @@ function Ball({ size = 26, line = 1.5 }: { size?: number; line?: number }) {
 }
 
 function Header() {
-  const sources = useGame((s) => s.sources);
-  const channels = useGame((s) => s.channels);
-  const connected = Object.values(sources).filter(Boolean).length;
-  const live = Object.values(channels).filter(Boolean).length;
   return (
     <header className="fixed inset-x-0 top-0 z-20 flex h-[68px] items-center gap-4 px-5">
       <div className="flex items-center gap-2.5">
@@ -98,19 +96,18 @@ function Header() {
           KOBE<span className="text-gold">.AI</span>
         </span>
       </div>
-      <div className="glass label hidden items-center gap-2 rounded-full px-3 py-1.5 text-[#D9D2C7] md:flex">
-        <span className="h-[7px] w-[7px] rounded-full bg-green shadow-[0_0_10px_var(--green)] [animation:kpulse_1.8s_ease-in-out_infinite]" />
-        SCOUTING {connected} SOURCES
+      <div className="glass label hidden items-center gap-2 rounded-full px-3 py-1.5 whitespace-nowrap text-[#D9D2C7] md:flex">
+        <span className="h-[7px] w-[7px] rounded-full bg-gold" />
+        DEMO · SAMPLE DATA
       </div>
       <SeasonHud />
       <div className="ml-auto flex gap-2">
         <button onClick={() => game.openModal("sources")} className="glass press flex h-[38px] items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold">
           Integrations
-          <span className="label rounded-md bg-gold/20 px-1.5 py-0.5 text-gold">{connected}</span>
+          <span className="label rounded-md bg-gold/20 px-1.5 py-0.5 text-gold">SOON</span>
         </button>
         <button onClick={() => game.openModal("channels")} className="press hidden h-[38px] items-center gap-2 rounded-full bg-chalk px-4 text-[13px] font-bold text-ink sm:flex">
           Add Kobe to…
-          {live > 0 && <span className="label rounded-md bg-ink px-1.5 py-0.5 text-gold">{live}</span>}
         </button>
       </div>
     </header>
@@ -194,7 +191,7 @@ function Thread() {
   return (
     <ThreadPrimitive.Root className="contents">
       <ThreadPrimitive.Viewport className="chat-mask fixed top-[68px] right-0 bottom-[104px] left-0 z-[5] overflow-y-auto min-[1000px]:right-[380px]">
-        <div className="mx-auto flex max-w-[720px] flex-col gap-3.5 px-5 pt-[6vh] pb-8">
+        <div className="mx-auto flex max-w-[720px] flex-col gap-3.5 px-5 pt-[96px] pb-8 min-[1000px]:pt-[6vh]">
           <Hero />
           <motion.div {...enter} className="flex max-w-[92%] items-start gap-2.5">
             <span className="mt-0.5">
@@ -244,7 +241,7 @@ function Hero() {
         ))}
       </h1>
       <p className="max-w-[520px] text-base leading-normal text-chalk-2 [text-wrap:pretty]">
-        Kobe watches your inbox, calendar, socials and calls so you never miss a birthday, double-book a night, or walk into a conversation cold.
+        Never miss a birthday, double-book a night, or walk into a conversation cold. This demo runs on a sample roster, feed and calendar. Inbox and social integrations are not connected yet.
       </p>
       <div className="mt-1.5 flex flex-wrap gap-2">
         {CHIPS.map((c, i) => (
@@ -327,70 +324,16 @@ function AssistantMessage() {
 
 /* ───────────────────────── Composer ───────────────────────── */
 
-const VOICE_LINES = ["Who should I check in with this week?", "Brief me on Marcus before coffee", "Any birthdays coming up?", "Do I have conflicts on Thursday?"];
-
 function Composer() {
-  const [rec, setRec] = useState<number | null>(null);
-  const [vi, setVi] = useState(0);
-  useEffect(() => {
-    if (rec === null) return;
-    const id = setInterval(() => setRec((r) => (r === null ? null : r + 1)), 1000);
-    return () => clearInterval(id);
-  }, [rec === null]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const stop = (send: boolean) => {
-    setRec(null);
-    if (send) {
-      game.ask(VOICE_LINES[vi % VOICE_LINES.length]);
-      setVi((v) => v + 1);
-    }
-  };
-
   return (
     <div className="fixed right-0 bottom-[22px] left-0 z-10 px-4 min-[1000px]:right-[380px]">
       <ComposerPrimitive.Root className="glass mx-auto flex max-w-[720px] items-center gap-2.5 rounded-full py-2 pr-2 pl-5 shadow-[0_24px_60px_rgba(0,0,0,.5)]">
-        {rec === null ? (
-          <ComposerPrimitive.Input
-            rows={1}
-            autoFocus
-            placeholder="Ask Kobe about anyone you know…"
-            className="h-10 min-w-0 flex-1 resize-none bg-transparent py-2.5 text-[15.5px] text-chalk outline-none placeholder:text-chalk-3"
-          />
-        ) : (
-          <div className="flex h-10 min-w-0 flex-1 items-center gap-3">
-            <span className="label text-[12px] text-red">● 0:{String(rec).padStart(2, "0")}</span>
-            <div className="flex h-[22px] min-w-0 flex-1 items-center gap-[3px] overflow-hidden">
-              {Array.from({ length: 28 }, (_, i) => (
-                <span
-                  key={i}
-                  className="h-[22px] w-[3px] flex-none rounded-sm bg-gold"
-                  style={{ animation: `kbar ${(0.6 + ((i * 37) % 9) / 12).toFixed(2)}s ease-in-out ${(-((i * 53) % 10) / 10).toFixed(2)}s infinite` }}
-                />
-              ))}
-            </div>
-            <button type="button" onClick={() => stop(false)} className="press h-[30px] flex-none rounded-full border border-white/15 px-3 text-[12.5px] text-chalk-2">
-              Cancel
-            </button>
-          </div>
-        )}
-        <button
-          type="button"
-          title={rec === null ? "Voice message" : "Stop and send"}
-          onClick={() => (rec === null ? setRec(0) : stop(true))}
-          className="press grid h-[46px] w-[46px] flex-none place-items-center rounded-full border"
-          style={{
-            background: rec === null ? "rgba(255,255,255,.06)" : "var(--red)",
-            borderColor: rec === null ? "rgba(255,255,255,.14)" : "var(--red)",
-            animation: rec === null ? "none" : "kring 1.2s ease-out infinite",
-          }}
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="9" y="3" width="6" height="11" rx="3" />
-            <path d="M5 11a7 7 0 0 0 14 0" />
-            <line x1="12" y1="18" x2="12" y2="21" />
-            <line x1="8.5" y1="21" x2="15.5" y2="21" />
-          </svg>
-        </button>
+        <ComposerPrimitive.Input
+          rows={1}
+          autoFocus
+          placeholder="Ask Kobe about anyone you know…"
+          className="h-10 min-w-0 flex-1 resize-none bg-transparent py-2.5 text-[15.5px] text-chalk outline-none placeholder:text-chalk-3"
+        />
         <ComposerPrimitive.Send asChild>
           <button title="Send" className="ball flex-none rounded-full shadow-[0_6px_18px_rgba(224,113,42,.45)] disabled:opacity-60">
             <Ball size={46} line={2} />
@@ -401,21 +344,23 @@ function Composer() {
   );
 }
 
-/* ───────────────────────── Right lane: game plan + live alerts ───────────────────────── */
+/* ───────────────────────── Lane: game plan + sample feed alerts ───────────────────────── */
 
+// Wide screens get a right-hand lane. Below 1000px it becomes a strip under the header that
+// shows the game plan collapsed and only the newest alert.
 function Lane() {
   const alerts = useGame((s) => s.alerts);
   const visible = [...alerts].reverse().filter((a) => a.visible);
   return (
-    <aside className="pointer-events-none fixed top-[76px] right-5 bottom-[104px] z-30 hidden w-[340px] flex-col gap-2.5 overflow-y-auto pb-5 min-[1000px]:flex">
+    <aside className="pointer-events-none fixed top-[84px] right-4 left-4 z-30 flex flex-col gap-2.5 min-[1000px]:top-[76px] min-[1000px]:right-5 min-[1000px]:bottom-[104px] min-[1000px]:left-auto min-[1000px]:w-[340px] min-[1000px]:overflow-y-auto min-[1000px]:pb-5">
       <GamePlan />
       {visible.length > 1 && (
-        <button onClick={game.clearAlerts} className="glass label press pointer-events-auto h-[26px] self-end rounded-full px-2.5 text-chalk-2">
+        <button onClick={game.clearAlerts} className="glass label press pointer-events-auto hidden h-[26px] self-end rounded-full px-2.5 text-chalk-2 min-[1000px]:block">
           CLEAR {visible.length}
         </button>
       )}
       <AnimatePresence initial={false}>
-        {visible.map((a) => (
+        {visible.map((a, i) => (
           <motion.div
             key={a.id}
             layout
@@ -423,7 +368,7 @@ function Lane() {
             animate={{ opacity: 1, transform: "translateY(0px) scale(1)", filter: "blur(0px)" }}
             exit={{ opacity: 0, transform: "translateX(24px) scale(0.98)", transition: { duration: 0.18, ease: EASE_OUT } }}
             transition={{ duration: 0.4, ease: EASE_OUT, layout: { type: "spring", duration: 0.4, bounce: 0 } }}
-            className="glass pointer-events-auto flex flex-col gap-2 rounded-[18px] bg-[rgba(16,12,20,.76)]! p-4 pr-3.5 shadow-[0_18px_50px_rgba(0,0,0,.5)]"
+            className={`glass pointer-events-auto flex-col gap-2 rounded-[18px] bg-[rgba(16,12,20,.94)]! p-4 pr-3.5 min-[1000px]:bg-[rgba(16,12,20,.76)]! shadow-[0_18px_50px_rgba(0,0,0,.5)] ${i === 0 ? "flex" : "hidden min-[1000px]:flex"}`}
           >
             <div className="label flex items-center gap-2">
               <span className="h-2 w-2 rounded-full" style={{ background: a.color, boxShadow: `0 0 12px ${a.color}` }} />
@@ -462,20 +407,26 @@ function Lane() {
 
 function GamePlan() {
   const plays = useGame((s) => s.plays);
+  const [open, setOpen] = useState(false);
   const done = PLAYS.filter((p) => plays[p.id]).length;
   const prompts: Record<string, string> = { maya: "Draft a birthday message for Maya", marcus: "Brief me on Marcus", dev: "Draft a reply to Dev" };
   return (
-    <div className="glass pointer-events-auto flex flex-col gap-3 rounded-[18px] p-4">
-      <div className="flex items-end justify-between">
+    <div className="glass pointer-events-auto flex flex-col gap-3 rounded-[18px] bg-[rgba(16,12,20,.94)]! px-4 py-3 min-[1000px]:bg-(--glass)! min-[1000px]:p-4">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex items-center justify-between text-left min-[1000px]:pointer-events-none min-[1000px]:items-end"
+      >
         <div className="flex flex-col gap-1">
           <span className="label text-gold">TODAY&apos;S GAME PLAN</span>
-          <span className="display text-[28px]">
+          <span className="display text-[22px] min-[1000px]:text-[28px]">
             {done}/{PLAYS.length} plays
           </span>
         </div>
         <ShotClock done={done} total={PLAYS.length} />
-      </div>
-      <div className="flex flex-col">
+      </button>
+      <div className={`flex-col ${open ? "flex" : "hidden"} min-[1000px]:flex`}>
         {PLAYS.map((p) => {
           const ok = plays[p.id];
           return (
@@ -508,7 +459,7 @@ function ShotClock({ done, total }: { done: number; total: number }) {
   const r = 18;
   const c = 2 * Math.PI * r;
   return (
-    <svg width="48" height="48" viewBox="0 0 48 48" className="-rotate-90">
+    <svg viewBox="0 0 48 48" className="h-10 w-10 -rotate-90 min-[1000px]:h-12 min-[1000px]:w-12">
       <circle cx="24" cy="24" r={r} fill="none" stroke="rgba(255,255,255,.1)" strokeWidth="4" />
       <motion.circle
         cx="24"
@@ -563,10 +514,12 @@ function Modal({ open, onClose, children, width }: { open: boolean; onClose: () 
   );
 }
 
+function Soon() {
+  return <span className="label flex-none rounded-md bg-white/[.07] px-1.5 py-0.5 text-[10px] text-chalk-3">SOON</span>;
+}
+
 function Integrations() {
   const modal = useGame((s) => s.modal);
-  const sources = useGame((s) => s.sources);
-  const channels = useGame((s) => s.channels);
   const close = () => game.openModal(null);
   const tab = modal === "channels" ? "channels" : "sources";
   return (
@@ -590,37 +543,23 @@ function Integrations() {
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Scouting sources</div>
               <div className="text-sm text-[#BDB5AA]">
-                {Object.values(sources).filter(Boolean).length} connected. Kobe reads to build context and never posts on your behalf.
+                None of these are connected yet. Kobe will read them to build context and never post on your behalf. Today it runs on a sample roster, feed and calendar.
               </div>
             </div>
             {SOURCE_GROUPS.map((g) => (
               <div key={g.name} className="flex flex-col gap-2.5">
                 <span className="label text-gold">{g.name}</span>
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2">
-                  {g.items.map((it) => {
-                    const on = !!sources[it.id];
-                    return (
-                      <button
-                        key={it.id}
-                        onClick={() => game.toggleSource(it.id, it.name)}
-                        className={`row press flex items-center gap-3 rounded-[14px] border bg-white/[.035] p-3 text-left ${on ? "border-gold/45" : "border-white/[.08]"}`}
-                      >
-                        <span className={`display grid h-9 w-9 flex-none place-items-center rounded-[10px] text-[15px] transition-colors duration-200 ${on ? "bg-gold text-ink" : "bg-white/[.07] text-[#CFC7BB]"}`}>
-                          {it.mono}
-                        </span>
-                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                          <span className="text-sm font-semibold">{it.name}</span>
-                          <span className="truncate text-xs text-[#ACA397]">{it.desc}</span>
-                        </span>
-                        <span className={`relative h-5 w-9 flex-none rounded-full transition-colors duration-200 ${on ? "bg-gold" : "bg-white/15"}`}>
-                          <span
-                            className="absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-chalk transition-transform duration-200"
-                            style={{ transform: on ? "translateX(16px)" : "none", transitionTimingFunction: "var(--ease-out)" }}
-                          />
-                        </span>
-                      </button>
-                    );
-                  })}
+                  {g.items.map((it) => (
+                    <div key={it.id} className="flex items-center gap-3 rounded-[14px] border border-white/[.08] bg-white/[.035] p-3">
+                      <span className="display grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.07] text-[15px] text-[#CFC7BB]">{it.mono}</span>
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span className="text-sm font-semibold">{it.name}</span>
+                        <span className="truncate text-xs text-[#ACA397]">{it.desc}</span>
+                      </span>
+                      <Soon />
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}
@@ -640,26 +579,19 @@ function Integrations() {
           <>
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Put Kobe in your rotation</div>
-              <div className="text-sm text-[#BDB5AA]">Talk to Kobe wherever you already message. Alerts follow you there.</div>
+              <div className="text-sm text-[#BDB5AA]">Coming soon: talk to Kobe wherever you already message. For now Kobe lives on this page.</div>
             </div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2">
-              {CHANNELS.map((ch) => {
-                const on = !!channels[ch.id];
-                return (
-                  <button
-                    key={ch.id}
-                    onClick={() => game.toggleChannel(ch.id, ch.name)}
-                    className={`row press flex items-center gap-3 rounded-[14px] border p-3 text-left ${on ? "border-green/50 bg-green/[.06]" : "border-white/[.07] bg-white/[.025]"}`}
-                  >
-                    <span className="display grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.08] text-[14px]">{ch.mono}</span>
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="text-sm font-semibold">{ch.name}</span>
-                      <span className="label text-[10px] text-gold">{ch.handle}</span>
-                    </span>
-                    <span className={`label ${on ? "text-green" : "text-chalk-3"}`}>{on ? "LIVE" : "ADD"}</span>
-                  </button>
-                );
-              })}
+              {CHANNELS.map((ch) => (
+                <div key={ch.id} className="flex items-center gap-3 rounded-[14px] border border-white/[.07] bg-white/[.025] p-3">
+                  <span className="display grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.08] text-[14px]">{ch.mono}</span>
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="text-sm font-semibold">{ch.name}</span>
+                    <span className="truncate text-xs text-[#ACA397]">{ch.desc}</span>
+                  </span>
+                  <Soon />
+                </div>
+              ))}
             </div>
           </>
         )}
@@ -669,13 +601,14 @@ function Integrations() {
 }
 
 function RecordModal() {
-  const id = useGame((s) => s.record);
-  const rapport = useGame((s) => s.rapport);
-  const r = id ? RECORDS[id] : null;
+  const r = useGame((s) => (s.record ? s.people[s.record] : undefined));
   const close = () => game.openRecord(null);
+  const seed = r && r.id in RECORDS ? RECORDS[r.id as RecordId] : undefined;
+  const action = seed?.action ?? "Brief me";
+  const prompt = seed?.prompt ?? `Brief me on ${r?.name}`;
   return (
     <Modal open={!!r} onClose={close} width={460}>
-      {r && id && (
+      {r && (
         <div className="flex flex-col gap-4.5 overflow-y-auto p-5.5">
           <div className="flex items-start gap-4">
             <div className="flex flex-1 flex-col gap-2">
@@ -688,7 +621,7 @@ function RecordModal() {
             </div>
             <div className="flex flex-col items-end gap-0.5">
               <span className="display text-[76px] leading-[.85] text-transparent [-webkit-text-stroke:1.5px_var(--gold)]">
-                <Counter value={rapport[id]} />
+                <Counter value={r.rapport} />
               </span>
               <span className="label text-[9.5px] text-chalk-3">RAPPORT</span>
             </div>
@@ -726,11 +659,11 @@ function RecordModal() {
             <button
               onClick={() => {
                 close();
-                game.ask(r.prompt);
+                game.ask(prompt);
               }}
               className="press h-[42px] flex-1 rounded-full bg-gold text-sm font-bold text-ink"
             >
-              {r.action}
+              {action}
             </button>
             <button onClick={close} className="press h-[42px] rounded-full border border-white/15 px-4.5 text-sm">
               Close

@@ -1,4 +1,5 @@
 -- Kobe.ai schema. Plain Postgres: runs on Neon or any self-hosted Postgres 15+.
+-- Safe to re-run: every statement is additive.
 
 create table if not exists people (
   id          text primary key,
@@ -15,13 +16,16 @@ create table if not exists people (
 );
 
 create table if not exists season (
-  id      text primary key default 'me',
-  xp      int not null default 0,
-  assists int not null default 0,
-  streak  int not null default 0
+  id          text primary key default 'me',
+  xp          int not null default 0,
+  assists     int not null default 0,
+  streak      int not null default 0,
+  -- The streak counts consecutive days with at least one assist or play.
+  last_active date
 );
+alter table season add column if not exists last_active date;
 
--- Every message Kobe sends on your behalf is an "assist".
+-- Every draft you copy and send yourself is logged as an "assist".
 create table if not exists touches (
   id         bigserial primary key,
   person_id  text references people(id) on delete cascade,
@@ -37,7 +41,7 @@ create table if not exists plays (
   primary key (day, play_id)
 );
 
-insert into season (id, xp, assists, streak) values ('me', 180, 12, 6)
+insert into season (id, xp, assists, streak, last_active) values ('me', 180, 12, 6, current_date - 1)
 on conflict (id) do nothing;
 
 insert into people (id, name, role, tier, birthday, last_touch, next_up, rapport, points, open_loop, sources) values

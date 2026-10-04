@@ -194,13 +194,6 @@ export const SOURCE_GROUPS: { name: string; items: SourceItem[] }[] = [
   },
 ];
 
-export const ENGINE = [
-  { name: "assistant-ui", job: "Chat runtime + tool cards" },
-  { name: "Mastra", job: "Agent loop + tools" },
-  { name: "Neon AI Gateway", job: "Model in live mode" },
-  { name: "Postgres", job: "Roster + season stats" },
-];
-
 export const CHANNELS = [
   { id: "telegram", name: "Telegram", mono: "TG", desc: "Chat with Kobe in a DM" },
   { id: "whatsapp", name: "WhatsApp", mono: "WA", desc: "Briefs and nudges by message" },

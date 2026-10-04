@@ -45,11 +45,28 @@ NEON_AI_GATEWAY_BASE_URL="https://<branch>-api.ai.<cell>.<region>.aws.neon.tech"
 KOBE_MODEL="neon/gpt-oss-120b"
 ```
 
+`pnpm dev` is the Next app. Its chat stays on `/api/chat`. `pnpm dev:vite` is the Vite court. It reads the gateway token, base URL, model, and `KOBE_PASSWORD` from that same `.env.local` inside the Node process. The browser bundle does not receive the token.
+
 Then load the schema. It is safe to re-run after pulling changes:
 
 ```bash
 psql "$DATABASE_URL" -f db/schema.sql
 ```
+
+## Import a WhatsApp chat
+
+With Postgres set up, Kobe can store a WhatsApp chat on the matching person's record. Export the chat without media and keep the file name WhatsApp gives it:
+
+- **iPhone:** open the chat, tap the name at the top, then Export Chat → Without Media. You get a `.zip`.
+- **Android:** open the chat, then ⋮ → More → Export chat → Without media. You get a `.txt`.
+
+```bash
+pnpm import:whatsapp "WhatsApp Chat - Valentina Ríos.zip"
+```
+
+It prints how many messages it stored, for whom, and the date range. Importing the same export again stores nothing new. A 1:1 chat goes onto the person with that name, and if nobody matches, Kobe adds them as "New from WhatsApp" for you to review. In a group chat, only senders already in your people are linked.
+
+Set `KOBE_OWNER_NAME` in `.env.local` to your name as WhatsApp shows it, or pass `--owner "Your Name"`, so your own messages are marked as yours. Times are read as `America/Argentina/Buenos_Aires` unless you set `KOBE_TIME_ZONE` or pass `--tz`. Photos and other media are not imported.
 
 ## Access
 

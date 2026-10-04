@@ -2,22 +2,26 @@
 
 import {
   AssistantRuntimeProvider,
+  AuiIf,
   ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
+  useAuiState,
   useLocalRuntime,
   type AssistantRuntime,
 } from "@assistant-ui/react";
 import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
-import { Dithering } from "@paper-design/shaders-react";
+import { Mic, Square } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
-import { CHANNELS, ENGINE, PLAYS, RECORDS, SAMPLE_CALENDAR, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
+import { CHANNELS, PLAYS, RECORDS, SAMPLE_CALENDAR, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
 import { game, registerAsk, useGame } from "@/lib/game";
 import { weeklyMixtape, type TouchNote } from "@/lib/highlights";
+import { LANG_NAMES, dictation, useHydrated, useVoice, voice } from "@/lib/voice";
 import { CourtShader } from "./court-shader";
 import { HighlightsCard, MixtapeView } from "./mixtape";
+import { ServiceLogo } from "./service-logo";
 import { BriefCard, ConflictCard, DraftCard, PeopleCard } from "./tool-cards";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
@@ -25,6 +29,7 @@ const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any confl
 
 // Live: Mastra agent on the Neon AI Gateway via /api/chat. Offline: scripted local agent.
 const transport = new AssistantChatTransport({ api: "/api/chat" });
+const adapters = { dictation };
 
 type Wiring = { roster: Person[]; touches: TouchNote[]; persisted: boolean };
 
@@ -36,26 +41,25 @@ function useWire(runtime: AssistantRuntime, { roster, touches, persisted }: Wiri
   }, [runtime, roster, touches, persisted]);
 }
 
-function LiveKobe({ model, ...wiring }: Wiring & { model: string }) {
-  const runtime = useChatRuntime({ transport });
+function LiveKobe(wiring: Wiring) {
+  const runtime = useChatRuntime({ transport, adapters });
   useWire(runtime, wiring);
-  return <Court runtime={runtime} engine={`LIVE AGENT · ${model.replace(/^neon\//, "").toUpperCase()} · SAMPLE FEED & CALENDAR`} />;
+  return <Court runtime={runtime} />;
 }
 
 function ScriptedKobe(wiring: Wiring) {
-  const runtime = useLocalRuntime(kobeAdapter);
+  const runtime = useLocalRuntime(kobeAdapter, { adapters });
   useWire(runtime, wiring);
-  return <Court runtime={runtime} engine="OFFLINE DEMO · SCRIPTED AGENT · SAMPLE DATA" />;
+  return <Court runtime={runtime} />;
 }
 
-export function KobeApp({ live, model, ...wiring }: Wiring & { live: boolean; model: string }) {
-  return live ? <LiveKobe model={model} {...wiring} /> : <ScriptedKobe {...wiring} />;
+export function KobeApp({ live, ...wiring }: Wiring & { live: boolean }) {
+  return live ? <LiveKobe {...wiring} /> : <ScriptedKobe {...wiring} />;
 }
 
-function Court({ runtime, engine }: { runtime: AssistantRuntime; engine: string }) {
+function Court({ runtime }: { runtime: AssistantRuntime }) {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <span className="label pointer-events-none fixed top-[calc(var(--header-h)-4px)] right-5 left-5 z-20 truncate text-[9.5px] text-chalk-3">{engine}</span>
       <CourtShader />
       <div className="grain" aria-hidden />
       <Header />
@@ -108,15 +112,10 @@ function Header() {
           KOBE<span className="text-gold">.AI</span>
         </span>
       </div>
-      <div className="glass label hidden items-center gap-2 rounded-full px-3 py-1.5 whitespace-nowrap text-[#D9D2C7] md:flex">
-        <span className="h-[7px] w-[7px] rounded-full bg-gold" />
-        DEMO · SAMPLE DATA
-      </div>
       <SeasonHud />
       <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
         <button onClick={() => game.openModal("sources")} className="glass press flex h-[38px] flex-none items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold whitespace-nowrap">
           Integrations
-          <span className="label rounded-md bg-gold/20 px-1.5 py-0.5 text-gold">SOON</span>
         </button>
         <button onClick={() => game.openModal("channels")} className="press flex h-[38px] flex-none items-center gap-2 rounded-full bg-chalk px-4 text-[13px] font-bold whitespace-nowrap text-ink">
           Add Kobe to…
@@ -225,19 +224,7 @@ function Hero() {
     [],
   );
   return (
-    <div className="relative mb-5 flex flex-col gap-3.5">
-      <div className="pointer-events-none absolute -top-6 right-0 hidden h-40 w-40 sm:block" aria-hidden>
-        <Dithering
-          style={{ width: "100%", height: "100%" }}
-          colorBack="#00000000"
-          colorFront="#E0712A"
-          shape="sphere"
-          type="4x4"
-          size={2}
-          scale={0.62}
-          speed={reduce ? 0 : 0.6}
-        />
-      </div>
+    <div className="mb-5 flex flex-col gap-3.5">
       <span className="label text-gold">COURTSIDE · {today}</span>
       <h1 className="display max-w-[560px] text-[clamp(52px,8.5vw,92px)] [text-wrap:balance]">
         {["Know", "your", "people."].map((w, i) => (
@@ -253,7 +240,7 @@ function Hero() {
         ))}
       </h1>
       <p className="max-w-[520px] text-base leading-normal text-chalk-2 [text-wrap:pretty]">
-        Never miss a birthday, double-book a night, or walk into a conversation cold. This demo runs on a sample roster, feed and calendar. Inbox and social integrations are not connected yet.
+        Never miss a birthday, double-book a night, or walk into a conversation cold.
       </p>
       <div className="mt-1.5 flex flex-wrap gap-2">
         <button type="button" onClick={() => game.openModal("highlights")} className="glass chip press h-[34px] rounded-full px-3.5 text-[13px]">
@@ -376,6 +363,7 @@ function Composer() {
 
   return (
     <div className="fixed right-0 bottom-[22px] left-0 z-10 px-4 min-[1000px]:right-[380px]">
+      <VoiceNotice />
       <ComposerPrimitive.Root className="glass mx-auto flex max-w-[720px] items-center gap-2.5 rounded-full py-2 pr-2 pl-5 shadow-[0_24px_60px_rgba(0,0,0,.5)]">
         <ComposerPrimitive.Input
           ref={input}
@@ -385,12 +373,97 @@ function Composer() {
           aria-label={PLACEHOLDER}
           className="h-10 min-w-0 flex-1 resize-none bg-transparent py-2.5 text-[15.5px] text-chalk outline-none placeholder:text-chalk-3"
         />
+        <Dictation />
         <ComposerPrimitive.Send asChild>
           <button title="Send" className="ball flex-none rounded-full shadow-[0_6px_18px_rgba(224,113,42,.45)] disabled:opacity-60">
             <Ball size={46} line={2} />
           </button>
         </ComposerPrimitive.Send>
       </ComposerPrimitive.Root>
+    </div>
+  );
+}
+
+// Push-to-talk. Hidden until hydration and in browsers without Web Speech.
+function Dictation() {
+  const hydrated = useHydrated();
+  const lang = useVoice((s) => s.lang);
+  const listening = useAuiState((s) => s.composer.dictation != null);
+  const [local, setLocal] = useState(false);
+  const refocus = useRef(false);
+  useEffect(() => {
+    let live = true;
+    dictation?.prepare().then(() => live && setLocal(!!dictation?.isLocal()));
+    return () => {
+      live = false;
+    };
+  }, [lang]);
+  if (!hydrated || !dictation) return null;
+
+  // Starting or stopping swaps the button. Keep keyboard focus on whichever one is showing.
+  const handoff = {
+    onClick: (e: MouseEvent<HTMLButtonElement>) => {
+      refocus.current = document.activeElement === e.currentTarget;
+      voice.notify(null);
+    },
+    ref: (el: HTMLButtonElement | null) => {
+      if (el && refocus.current && el !== document.activeElement) {
+        refocus.current = false;
+        el.focus();
+      }
+    },
+  };
+  const other = lang === "es" ? "en" : "es";
+  const dictate = `Dictate in ${LANG_NAMES[lang]}${local ? ", on this device" : ""}`;
+  return (
+    <>
+      <button
+        type="button"
+        disabled={listening}
+        onClick={() => voice.setLang(other)}
+        title={`Dictation language: ${LANG_NAMES[lang]}. Switch to ${LANG_NAMES[other]}`}
+        aria-label={`Dictation language: ${LANG_NAMES[lang]}. Switch to ${LANG_NAMES[other]}`}
+        className="label press h-8 min-w-8 flex-none rounded-full px-1.5 text-chalk-3 hover:text-gold disabled:opacity-40"
+      >
+        {lang}
+      </button>
+      <AuiIf condition={(s) => s.composer.dictation == null}>
+        <ComposerPrimitive.Dictate asChild>
+          <button {...handoff} title={dictate} aria-label={dictate} className="mic glass press grid h-10 w-10 flex-none place-items-center rounded-full text-chalk-2">
+            <Mic size={18} aria-hidden />
+          </button>
+        </ComposerPrimitive.Dictate>
+      </AuiIf>
+      <AuiIf condition={(s) => s.composer.dictation != null}>
+        <ComposerPrimitive.StopDictation asChild>
+          <button {...handoff} title="Stop dictation" aria-label="Stop dictation" className="listening press grid h-10 w-10 flex-none place-items-center rounded-full bg-gold text-ink">
+            <Square size={13} fill="currentColor" aria-hidden />
+          </button>
+        </ComposerPrimitive.StopDictation>
+      </AuiIf>
+    </>
+  );
+}
+
+function VoiceNotice() {
+  const notice = useVoice((s) => s.notice);
+  const reduce = useReducedMotion();
+  return (
+    <div role="status" aria-live="polite" className="mx-auto flex max-w-[720px] justify-center">
+      <AnimatePresence>
+        {notice && (
+          <motion.div
+            key={notice}
+            initial={{ opacity: 0, transform: reduce ? "none" : "translateY(6px)" }}
+            animate={{ opacity: 1, transform: "translateY(0px)" }}
+            exit={{ opacity: 0, transition: { duration: 0.15 } }}
+            transition={{ duration: 0.25, ease: EASE_OUT }}
+            className="glass mb-2 rounded-full px-4 py-2 text-center text-[13px] leading-snug text-chalk-2 [text-wrap:pretty]"
+          >
+            {notice}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -569,10 +642,6 @@ function Modal({ open, onClose, children, width }: { open: boolean; onClose: () 
   );
 }
 
-function Soon() {
-  return <span className="label flex-none rounded-md bg-white/[.07] px-1.5 py-0.5 text-[10px] text-chalk-3">SOON</span>;
-}
-
 function HighlightsModal() {
   const open = useGame((s) => s.modal === "highlights");
   const people = useGame((s) => s.people);
@@ -624,9 +693,7 @@ function Integrations() {
           <>
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Scouting sources</div>
-              <div className="text-sm text-[#BDB5AA]">
-                None of these are connected yet. Kobe will read them to build context and never post on your behalf. Today it runs on a sample roster, feed and calendar.
-              </div>
+              <div className="text-sm text-[#BDB5AA]">Kobe will read them to build context and never post on your behalf.</div>
             </div>
             {SOURCE_GROUPS.map((g) => (
               <div key={g.name} className="flex flex-col gap-2.5">
@@ -634,44 +701,31 @@ function Integrations() {
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2">
                   {g.items.map((it) => (
                     <div key={it.id} className="flex items-center gap-3 rounded-[14px] border border-white/[.08] bg-white/[.035] p-3">
-                      <span className="display grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.07] text-[15px] text-[#CFC7BB]">{it.mono}</span>
+                      <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.07] text-[#CFC7BB]"><ServiceLogo id={it.id} size={22} /></span>
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span className="text-sm font-semibold">{it.name}</span>
                         <span className="truncate text-xs text-[#ACA397]">{it.desc}</span>
                       </span>
-                      <Soon />
                     </div>
                   ))}
                 </div>
               </div>
             ))}
-            <div className="flex flex-col gap-2.5 rounded-2xl border border-dashed border-white/15 p-4">
-              <span className="label text-chalk-3">UNDER THE HOOD · BUILD PERSONAL AGENTS HACK</span>
-              <div className="flex flex-wrap gap-2">
-                {ENGINE.map((e) => (
-                  <span key={e.name} className="flex items-baseline gap-2 rounded-full border border-white/12 px-3 py-1.5">
-                    <span className="text-[13px] font-semibold">{e.name}</span>
-                    <span className="label text-[9.5px] text-chalk-3">{e.job}</span>
-                  </span>
-                ))}
-              </div>
-            </div>
           </>
         ) : (
           <>
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Put Kobe in your rotation</div>
-              <div className="text-sm text-[#BDB5AA]">Coming soon: talk to Kobe wherever you already message. For now Kobe lives on this page.</div>
+              <div className="text-sm text-[#BDB5AA]">Talk to Kobe wherever you already message.</div>
             </div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2">
               {CHANNELS.map((ch) => (
                 <div key={ch.id} className="flex items-center gap-3 rounded-[14px] border border-white/[.07] bg-white/[.025] p-3">
-                  <span className="display grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.08] text-[14px]">{ch.mono}</span>
+                  <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.08]"><ServiceLogo id={ch.id} size={22} /></span>
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="text-sm font-semibold">{ch.name}</span>
                     <span className="truncate text-xs text-[#ACA397]">{ch.desc}</span>
                   </span>
-                  <Soon />
                 </div>
               ))}
             </div>

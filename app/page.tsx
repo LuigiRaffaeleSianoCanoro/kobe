@@ -14,12 +14,6 @@ export default async function Page() {
   const roster = api ? await loadRoster() : SEED_ROSTER;
   const touches = api ? await loadTouches() : [];
   return (
-    <KobeApp
-      live={live}
-      persisted={api && !!sql}
-      roster={roster}
-      touches={touches}
-      model={process.env.KOBE_MODEL ?? "neon/gpt-oss-120b"}
-    />
+    <KobeApp live={live} persisted={api && !!sql} roster={roster} touches={touches} />
   );
 }

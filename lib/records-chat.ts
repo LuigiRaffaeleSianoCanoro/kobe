@@ -1,5 +1,5 @@
 import { SAMPLE_CALENDAR, type StoredEvent } from "./calendar";
-import { sourcesNamed, type Connector } from "./connectors";
+import { isLiveConnector, sourcesNamed, type Connector } from "./connectors";
 import { type DraftChannel, type Person } from "./data";
 
 export type ChatReply = {
@@ -205,11 +205,13 @@ function sentences(parts: string[]): string {
     .join(". ");
 }
 
-/** Draft copy is only the fields already stored on the record. */
+/**
+ * A body the recipient could receive. Open loops, next plans, talking points,
+ * and other record fields are private notes, so they stay off the message.
+ */
 export function draftBody(person: Person): string {
   const first = person.name.trim().split(/\s+/)[0] || person.name;
-  const body = `Hi ${first}. ${sentences([person.loop, person.next, person.birthday, ...person.points])}.`;
-  return body.length > 280 ? `${body.slice(0, 277)}...` : body;
+  return `Hi ${first}.`;
 }
 
 function quoteRecord(person: Person): string {
@@ -326,8 +328,12 @@ function conflictReply(people: Person[], calendar: StoredEvent[]): ChatReply {
   };
 }
 
+function connected(source: Connector): boolean {
+  return isLiveConnector(source.id);
+}
+
 function prefixLocal(sources: Connector[], text: string): string {
-  const lead = sources.filter((source) => !source.live).map((source) => `${source.name} is not connected.`).join(" ");
+  const lead = sources.filter((source) => !connected(source)).map((source) => `${source.name} is not connected.`).join(" ");
   return [lead, text].filter(Boolean).join(" ");
 }
 
@@ -339,8 +345,8 @@ function prefixLocal(sources: Connector[], text: string): string {
 export function replyFromRecords(input: string, people: Person[], toggles: Record<string, boolean> = {}, now = new Date()): ChatReply {
   void toggles;
   const sources = sourcesNamed(input);
-  const locals = sources.filter((source) => !source.live);
-  const lives = sources.filter((source) => source.live);
+  const locals = sources.filter((source) => !connected(source));
+  const lives = sources.filter((source) => connected(source));
   const asked = resolveAsk(input, people);
 
   if (asked.ambiguous) {

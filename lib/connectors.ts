@@ -526,8 +526,8 @@ export function createConnectorTools(input: { gmail: GmailClient | null; slack: 
 
 export { USER_TEXT };
 
-// Gmail and Slack can actually send. Every other integration switch is local:
-// turning it on does not connect the account, and chat has to say so.
+// Gmail and Slack are the only channels that can send, and only after a real sender
+// is registered. Until then they are not connected. Every other switch is local.
 export type Connector = {
   id: string;
   name: string;
@@ -556,12 +556,19 @@ export const CONNECTORS: Connector[] = [
   { id: "sms", name: "SMS", live: false, mono: "SM", desc: "Text messages", aliases: ["sms", "text message"] },
 ];
 
-export const LIVE_CONNECTORS = CONNECTORS.filter((connector) => connector.live);
+export type SendId = "gmail" | "slack";
 
-const LIVE_IDS = new Set(LIVE_CONNECTORS.map((connector) => connector.id));
+export function isSendCapable(id: string): id is SendId {
+  return id === "gmail" || id === "slack";
+}
 
+/** True only when Gmail or Slack has a sender registered. A static flag is not a connection. */
 export function isLiveConnector(id: string): boolean {
-  return LIVE_IDS.has(id);
+  return isSendCapable(id) && senders[id] != null;
+}
+
+export function registeredLiveConnectors(): Connector[] {
+  return CONNECTORS.filter((connector) => isLiveConnector(connector.id));
 }
 
 export function connectorById(id: string): Connector | undefined {
@@ -624,7 +631,7 @@ export type LiveSender = (message: { to: string; body: string }) => Promise<{ ok
 
 export type SendResult = { ok: true } | { ok: false; reason: string };
 
-const senders: Partial<Record<"gmail" | "slack", LiveSender>> = {};
+const senders: Partial<Record<SendId, LiveSender>> = {};
 
 export function registerLiveSender(id: "gmail" | "slack", sender: LiveSender | null) {
   if (sender) senders[id] = sender;
@@ -651,12 +658,12 @@ export function channelConnector(channel: string): Connector | undefined {
   return id ? connectorById(id) : undefined;
 }
 
-/** Sends only through Gmail or Slack, and only when that connector actually accepts the message. */
+/** Sends only through a registered Gmail or Slack sender. Anything else is not connected. */
 export async function deliverDraft(channel: string, message: { to: string; body: string }): Promise<SendResult> {
   const source = channelConnector(channel);
-  if (!source?.live) return { ok: false, reason: `${source?.name ?? channel} is not connected.` };
-  const sender = senders[source.id as "gmail" | "slack"];
-  if (!sender) return { ok: false, reason: `${source.name} did not send this draft.` };
+  if (!source || !isSendCapable(source.id)) return { ok: false, reason: `${source?.name ?? channel} is not connected.` };
+  const sender = senders[source.id];
+  if (!sender) return { ok: false, reason: `${source.name} is not connected.` };
   try {
     const result = await sender(message);
     if (!result.ok) return { ok: false, reason: result.reason || `${source.name} did not send this draft.` };

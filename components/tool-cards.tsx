@@ -53,7 +53,11 @@ export function PeopleCard({ args }: ToolCallMessagePartProps) {
         return (
           <motion.button
             key={p.id}
-            onClick={() => person && game.openRecord(p.id)}
+            onClick={() => {
+              if (!person) return;
+              if (p.right === "TAPE" || /tape/i.test(title ?? "")) game.openTape(p.id);
+              else game.openRecord(p.id);
+            }}
             initial={{ opacity: 0, transform: "translateY(6px)" }}
             animate={{ opacity: 1, transform: "translateY(0px)" }}
             transition={{ duration: 0.3, ease: EASE_OUT, delay: 0.08 + i * 0.05 }}

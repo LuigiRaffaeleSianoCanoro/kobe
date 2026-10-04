@@ -23,7 +23,7 @@ export function MixtapeView({ tape, onOpen }: { tape: Mixtape; onOpen: (personId
         <span className="label text-chalk-3">{tape.label}</span>
       </div>
       <div className="display text-[34px]">Weekly mixtape</div>
-      <p className="text-[13.5px] leading-snug text-[#BDB5AA]">Built from the records and notes already stored. Inbox and social integrations are not connected.</p>
+      <p className="text-[13.5px] leading-snug text-[#BDB5AA]">Built from the records and notes already stored.</p>
       <span className="label text-chalk-3">
         {tape.tracks.length} {tape.tracks.length === 1 ? "TRACK" : "TRACKS"}
       </span>

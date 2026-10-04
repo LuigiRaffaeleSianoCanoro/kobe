@@ -17,33 +17,48 @@ import { Mic, Square } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
+import { coachingPayload } from "@/lib/coaching-memory";
 import { type ConnectorFlags } from "@/lib/connectors";
-import { CHANNELS, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
+import { CHANNELS, PLAYS, RECORDS, SAMPLE_CALENDAR, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
 import { game, registerAsk, useGame } from "@/lib/game";
+import { weeklyMixtape, type TouchNote } from "@/lib/highlights";
+import { NOTE_MAX, clipFrom } from "@/lib/tape";
 import { LANG_NAMES, dictation, useHydrated, useVoice, voice } from "@/lib/voice";
 import { CourtShader } from "./court-shader";
+import { HighlightsCard, MixtapeView } from "./mixtape";
 import { SavedPlanList, SetPlan } from "./plan-panel";
 import { ServiceLogo } from "./service-logo";
 import { BriefCard, ConflictCard, ConnectorDraftCard, ConnectorSendCard, DraftCard, GmailSearchCard, PeopleCard, PlanCard, SlackSearchCard } from "./tool-cards";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
-const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any conflicts this week?", "Who haven't I talked to lately?", "Remind me before Maya's birthday"];
+const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any conflicts this week?", "Who haven't I talked to lately?", "Remind me before Maya's birthday", "This week's mixtape"];
 
-// Live: Mastra agent on the Neon AI Gateway via /api/chat. Offline: scripted local agent.
-const transport = new AssistantChatTransport({ api: "/api/chat" });
+// Live: Mastra agent on the Neon AI Gateway via /api/chat. The local runtime answers when that is unavailable.
+const transport = new AssistantChatTransport({
+  api: "/api/chat",
+  fetch: async (input, init) => {
+    if (typeof init?.body !== "string") return fetch(input, init);
+    try {
+      const body = JSON.parse(init.body) as Record<string, unknown>;
+      return fetch(input, { ...init, body: JSON.stringify({ ...body, coaching: coachingPayload() }) });
+    } catch {
+      return fetch(input, init);
+    }
+  },
+});
 const adapters = { dictation };
 
-type Wiring = { roster: Person[]; persisted: boolean };
+type Wiring = { roster: Person[]; persisted: boolean; touches?: TouchNote[] };
 
 const ConnectorStatus = createContext<ConnectorFlags>({ gmail: false, slack: false });
 const useConnectorStatus = () => useContext(ConnectorStatus);
 
-function useWire(runtime: AssistantRuntime, { roster, persisted }: Wiring) {
+function useWire(runtime: AssistantRuntime, { roster, persisted, touches = [] }: Wiring) {
   useEffect(() => {
     registerAsk((text) => runtime.thread.append({ role: "user", content: [{ type: "text", text }] }));
-    game.load(roster, persisted);
+    game.load(roster, persisted, touches);
     return game.startFeed();
-  }, [runtime, roster, persisted]);
+  }, [runtime, roster, persisted, touches]);
 }
 
 function LiveKobe({ connectors, ...wiring }: Wiring & { connectors: ConnectorFlags }) {
@@ -73,6 +88,8 @@ function Court({ runtime, connectors }: { runtime: AssistantRuntime; connectors:
       <Composer />
       <Lane />
       <Integrations />
+      <HighlightsModal />
+      <GameTape />
       <RecordModal />
       </ConnectorStatus.Provider>
     </AssistantRuntimeProvider>
@@ -338,6 +355,7 @@ function AssistantMessage() {
                   draft_message: DraftCard,
                   resolve_conflict: ConflictCard,
                   set_plan: PlanCard,
+                  weekly_highlights: HighlightsCard,
                   gmail_search: GmailSearchCard,
                   gmail_draft: ConnectorDraftCard,
                   gmail_send: ConnectorSendCard,
@@ -512,6 +530,22 @@ function Lane() {
   return (
     <aside className="pointer-events-none fixed top-[calc(var(--header-h)+16px)] right-4 left-4 z-30 flex flex-col gap-2.5 min-[1000px]:top-[calc(var(--header-h)+8px)] min-[1000px]:right-5 min-[1000px]:bottom-[104px] min-[1000px]:left-auto min-[1000px]:w-[340px] min-[1000px]:overflow-y-auto min-[1000px]:pb-5">
       <GamePlan />
+      <div className="pointer-events-auto flex flex-wrap gap-2">
+        <button type="button" onClick={() => game.openTape()} className="glass press label h-[34px] rounded-full border border-gold/40 px-3 text-gold">
+          Game tape
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            game.closeTape();
+            game.openModal("highlights");
+          }}
+          className="glass press flex h-[34px] items-center gap-2 rounded-full px-3 text-left"
+        >
+          <span className="label text-gold">HIGHLIGHTS</span>
+          <span className="text-[13.5px] font-semibold">Weekly mixtape</span>
+        </button>
+      </div>
       {visible.length > 1 && (
         <button onClick={game.clearAlerts} className="glass label press pointer-events-auto hidden h-[26px] self-end rounded-full px-2.5 text-chalk-2 min-[1000px]:block">
           CLEAR {visible.length}
@@ -641,7 +675,7 @@ function ShotClock({ done, total }: { done: number; total: number }) {
 
 /* ───────────────────────── Modals ───────────────────────── */
 
-function Modal({ open, onClose, children, width }: { open: boolean; onClose: () => void; children: ReactNode; width: number }) {
+function Modal({ open, onClose, children, width, panelClassName = "" }: { open: boolean; onClose: () => void; children: ReactNode; width: number; panelClassName?: string }) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -666,7 +700,7 @@ function Modal({ open, onClose, children, width }: { open: boolean; onClose: () 
             exit={{ opacity: 0, transform: "scale(0.98)", transition: { duration: 0.15 } }}
             transition={{ duration: 0.3, ease: EASE_OUT }}
             style={{ width: `min(${width}px, 100%)` }}
-            className="flex max-h-[86vh] flex-col overflow-hidden rounded-3xl border border-white/10 bg-[rgba(18,13,16,.92)] shadow-[0_40px_100px_rgba(0,0,0,.6)] backdrop-blur-[26px]"
+            className={`flex max-h-[86vh] flex-col overflow-hidden rounded-3xl border border-white/10 bg-[rgba(18,13,16,.92)] shadow-[0_40px_100px_rgba(0,0,0,.6)] backdrop-blur-[26px] ${panelClassName}`}
           >
             {children}
           </motion.div>
@@ -705,9 +739,10 @@ function Integrations() {
   const modal = useGame((s) => s.modal);
   const connected = useConnectorStatus();
   const close = () => game.openModal(null);
+  const open = modal === "sources" || modal === "channels";
   const tab = modal === "channels" ? "channels" : "sources";
   return (
-    <Modal open={!!modal} onClose={close} width={860}>
+    <Modal open={open} onClose={close} width={860}>
       <div className="flex items-center gap-4 px-5.5 pt-5">
         <div className="flex gap-1 rounded-full bg-white/[.06] p-1">
           {(["sources", "channels"] as const).map((t) => (
@@ -773,6 +808,158 @@ function Integrations() {
   );
 }
 
+function HighlightsModal() {
+  const open = useGame((s) => s.modal === "highlights");
+  const people = useGame((s) => s.people);
+  const touches = useGame((s) => s.touches);
+  const tape = useMemo(() => weeklyMixtape(Object.values(people), SAMPLE_CALENDAR, new Date(), touches), [people, touches]);
+  const close = () => game.openModal(null);
+  return (
+    <Modal open={open} onClose={close} width={560}>
+      <div className="flex items-center px-5 pt-4">
+        <button type="button" onClick={close} aria-label="Close" className="press ml-auto grid h-[34px] w-[34px] place-items-center rounded-full bg-white/[.06] text-lg">
+          ×
+        </button>
+      </div>
+      <div className="overflow-y-auto px-5 pt-1 pb-6">
+        <MixtapeView
+          tape={tape}
+          onOpen={(id) => {
+            close();
+            game.openRecord(id);
+          }}
+        />
+      </div>
+    </Modal>
+  );
+}
+
+function CoachingNote({ personId }: { personId: string }) {
+  const note = useGame((s) => s.coaching[personId]?.note);
+  if (!note) return null;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="label text-gold">Luigi&apos;s coaching</span>
+      <p className="text-[13.5px] leading-snug text-[#F4E3BC]">{note}</p>
+    </div>
+  );
+}
+
+function GameTape() {
+  const tape = useGame((s) => s.tape);
+  const people = useGame((s) => s.people);
+  const saved = useGame((s) => (tape ? s.coaching[tape]?.note ?? "" : ""));
+  const person = tape ? people[tape] : undefined;
+  const [draft, setDraft] = useState(saved);
+  useEffect(() => setDraft(saved), [person?.id, saved]);
+  const roster = Object.values(people);
+  const clip = person ? clipFrom(person) : null;
+  const unchanged = draft.replace(/\s+/g, " ").trim() === saved;
+  const close = () => game.closeTape();
+
+  return (
+    <Modal open={!!person} onClose={close} width={860} panelClassName="h-[min(86vh,760px)]">
+      {person && clip && (
+        <>
+          <div className="flex flex-none items-start gap-4 px-5.5 pt-5 pb-3">
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <span className="label text-gold">Game tape</span>
+              <p className="text-sm leading-snug text-[#BDB5AA]">Review a past situation from the notes already on each person, then coach Kobe.</p>
+            </div>
+            <button onClick={close} aria-label="Close" className="press grid h-[34px] w-[34px] flex-none place-items-center rounded-full bg-white/[.06] text-lg">
+              ×
+            </button>
+          </div>
+          <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,28vh)_minmax(0,1fr)] overflow-hidden min-[800px]:grid-cols-[240px_1fr] min-[800px]:grid-rows-1">
+            <div className="flex max-h-[28vh] flex-col gap-1 overflow-y-auto border-b border-white/10 p-3 min-[800px]:max-h-none min-[800px]:border-r min-[800px]:border-b-0">
+              {roster.map((p) => {
+                const on = p.id === person.id;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => game.openTape(p.id)}
+                    className={`row press rounded-xl px-3 py-2.5 text-left ${on ? "border border-gold/50 bg-white/[.06]" : "border border-transparent"}`}
+                  >
+                    <span className="block text-sm font-semibold">{p.name}</span>
+                    <span className="mt-0.5 block text-[12.5px] leading-snug text-[#BDB5AA]">{p.loop || "No open loop on this record."}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="flex min-h-0 flex-col">
+              <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5.5 py-4">
+                <div className="flex flex-col gap-1.5">
+                  <span className="display text-[clamp(32px,5vw,46px)]">{person.name}</span>
+                  <span className="text-[13.5px] text-[#CFC7BB]">{person.role}</span>
+                </div>
+                <p className="text-sm leading-snug text-[#BDB5AA]">From the notes already on this record.</p>
+                <div className="flex flex-col gap-2">
+                  <span className="label text-gold">Situation</span>
+                  <p className="text-[15px] leading-snug">{clip.situation}</p>
+                  <div className="grid grid-cols-[96px_1fr] gap-x-3.5 gap-y-2 text-[13.5px]">
+                    <span className="label pt-0.5 text-chalk-3">Last touch</span>
+                    <span>{person.last || "Nothing on the record."}</span>
+                    <span className="label pt-0.5 text-chalk-3">Next up</span>
+                    <span>{person.next || "Nothing scheduled."}</span>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <span className="label text-gold">Notes</span>
+                  {clip.notes.length ? (
+                    clip.notes.map((note) => (
+                      <div key={note} className="flex gap-2.5 text-sm leading-snug text-[#E6E0D7]">
+                        <span className="mt-[7px] h-1.5 w-1.5 flex-none rotate-45 bg-gold" />
+                        <span>{note}</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-[#BDB5AA]">No talking points on this record.</p>
+                  )}
+                </div>
+                <div className="rounded-xl bg-white/[.04] px-3.5 py-3">
+                  <span className="label text-chalk-3">Kobe&apos;s read</span>
+                  <p className="mt-1.5 text-[14px] leading-snug text-[#E6E0D7]">{clip.read}</p>
+                </div>
+                <label className="flex flex-col gap-2">
+                  <span className="label text-gold">Coaching</span>
+                  <textarea
+                    value={draft}
+                    maxLength={NOTE_MAX}
+                    rows={3}
+                    onChange={(e) => setDraft(e.target.value)}
+                    placeholder="Coach Kobe on this situation…"
+                    className="w-full resize-none rounded-xl border border-white/10 bg-black/30 p-3 text-[15px] leading-normal outline-none placeholder:text-chalk-3 focus:border-gold/50"
+                  />
+                </label>
+              </div>
+              <div className="flex flex-none flex-wrap gap-2 border-t border-white/10 px-5.5 py-3">
+                <button
+                  disabled={unchanged}
+                  onClick={() => game.saveCoaching(person.id, draft)}
+                  className="press h-[42px] rounded-full bg-gold px-4 text-sm font-bold text-ink disabled:opacity-40"
+                >
+                  {draft.trim() ? "Save coaching" : "Clear coaching"}
+                </button>
+                <button
+                  onClick={() => {
+                    if (!unchanged) game.saveCoaching(person.id, draft);
+                    const name = person.name;
+                    close();
+                    game.ask(`Review the tape on ${name}`);
+                  }}
+                  className="press h-[42px] rounded-full border border-white/15 px-4 text-sm"
+                >
+                  Review with Kobe
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 function RecordModal() {
   const r = useGame((s) => (s.record ? s.people[s.record] : undefined));
   const close = () => game.openRecord(null);
@@ -821,6 +1008,7 @@ function RecordModal() {
             ))}
           </div>
           <div className="rounded-xl bg-gold/10 px-3.5 py-3 text-[13.5px] leading-snug text-[#F4E3BC]">Open loop: {r.loop}</div>
+          <CoachingNote personId={r.id} />
           <div className="flex flex-col gap-2">
             <span className="label text-gold">Triggers & routines</span>
             <SavedPlanList personId={r.id} />
@@ -833,7 +1021,7 @@ function RecordModal() {
               </span>
             ))}
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => {
                 close();
@@ -842,6 +1030,9 @@ function RecordModal() {
               className="press h-[42px] flex-1 rounded-full bg-gold text-sm font-bold text-ink"
             >
               {action}
+            </button>
+            <button onClick={() => game.openTape(r.id)} className="press h-[42px] rounded-full border border-gold/40 px-4 text-sm font-semibold text-gold">
+              Game tape
             </button>
             <button onClick={close} className="press h-[42px] rounded-full border border-white/15 px-4.5 text-sm">
               Close

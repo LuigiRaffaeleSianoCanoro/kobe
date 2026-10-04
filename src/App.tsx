@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CHIPS, D, INITIAL_SOURCES, PAIR_CODE, VOICE_LINES, type AlertAction, type FeedItem } from "./data";
 import { reply, type AgentReply } from "./agent";
 import { Court } from "./Court";
+import { ServiceLogo } from "../components/service-logo";
 import { PersonReport } from "./PersonReport";
 import { CRM_STORAGE_KEY, blankPerson, browserStorage, cardMeta, cardRight, cloneSeed, findPerson, fromForm, initials, peopleFromStoredJson, readPeople, readPeopleForUpdate, toForm, writePeople, type Person, type PersonForm } from "./crm";
 
@@ -561,11 +562,11 @@ export default function App() {
                   <div key={g.name} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <div style={{ font: `500 10.5px ${mono}`, letterSpacing: ".14em", color: "#F2B63A" }}>{g.name}</div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 8 }}>
-                      {g.items.map(([id, name, mark, desc]) => {
+                      {g.items.map(([id, name, , desc]) => {
                         const on = !!sources[id];
                         return (
                           <button key={id} className="src" onClick={() => toggleSource(id, name)} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, borderRadius: 14, background: "rgba(255,255,255,.035)", border: `1px solid ${on ? "rgba(242,182,58,.45)" : "rgba(255,255,255,.08)"}`, color: "#F4F1EC", textAlign: "left", transition: "border-color .2s" }}>
-                            <div style={{ flex: "none", width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", background: on ? "#F2B63A" : "rgba(255,255,255,.07)", color: on ? "#15110D" : "#CFC7BB", fontWeight: 800, fontStretch: "75%", fontSize: 14, transition: "background .2s" }}>{mark}</div>
+                            <div style={{ flex: "none", width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", background: on ? "#F2B63A" : "rgba(255,255,255,.07)", color: on ? "#15110D" : "#CFC7BB", transition: "background .2s, color .2s" }}><ServiceLogo id={id} size={22} /></div>
                             <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
                               <span style={{ fontSize: 14, fontWeight: 600 }}>{name}</span>
                               <span style={{ fontSize: 12, color: "#ACA397", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{desc}</span>
@@ -594,7 +595,7 @@ export default function App() {
                       const on = !!channels[c.id];
                       return (
                         <button key={c.id} className="ch" onClick={() => { setPairing(c.id); setPairBusy(false); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 12px", borderRadius: 14, background: sel ? "rgba(255,255,255,.08)" : "rgba(255,255,255,.025)", border: `1px solid ${sel ? "rgba(242,182,58,.5)" : "rgba(255,255,255,.07)"}`, color: "#F4F1EC", textAlign: "left" }}>
-                          <div style={{ flex: "none", width: 34, height: 34, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,.08)", fontWeight: 800, fontStretch: "75%", fontSize: 13 }}>{c.mono}</div>
+                          <div style={{ flex: "none", width: 34, height: 34, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,.08)" }}><ServiceLogo id={c.id} size={20} /></div>
                           <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>{c.name}</span>
                           <span style={{ font: `500 10px ${mono}`, letterSpacing: ".1em", color: on ? "#3DBE8B" : "#A39A8E" }}>{on ? "LIVE" : "ADD"}</span>
                         </button>
@@ -603,7 +604,7 @@ export default function App() {
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: 20, borderRadius: 18, background: "rgba(255,255,255,.04)", border: "1px solid rgba(255,255,255,.08)" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                      <div style={{ width: 52, height: 52, borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center", background: "#F4F1EC", color: "#15110D", fontWeight: 800, fontStretch: "72%", fontSize: 20 }}>{pc.mono}</div>
+                      <div style={{ width: 52, height: 52, borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center", background: "#F4F1EC", color: "#15110D" }}><ServiceLogo id={pc.id} size={30} /></div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                         <span style={{ fontWeight: 800, fontStretch: "72%", fontSize: 26, lineHeight: 1, textTransform: "uppercase" }}>{pc.name}</span>
                         <span style={{ font: `500 12px ${mono}`, color: "#F2B63A" }}>{pc.handle}</span>

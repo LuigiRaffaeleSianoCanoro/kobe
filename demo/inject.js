@@ -47,19 +47,19 @@
   };
 
   const CAPTIONS = [
-    { a: 2.45, b: 4.5, k: "COURTSIDE", text: "Kobe scouts your inbox, calendar & socials" },
-    { a: 4.6, b: 9.0, k: "01 · BIRTHDAYS", text: "Never miss a <em>birthday.</em>" },
-    { a: 9.1, b: 14.85, k: "02 · PREGAME", text: "Never walk in <em>cold.</em>" },
-    { a: 14.95, b: 18.85, k: "03 · CONFLICTS", text: "Never double-book a <em>night.</em>" },
-    { a: 18.95, b: 21.95, k: "04 · SOURCES", text: "Reads 18 sources. <em>Never posts.</em>" },
-    { a: 22.05, b: 25.0, k: "05 · CHANNELS", text: "Text Kobe on <em>Telegram, WhatsApp, Slack</em>" },
+    { a: 2.45, b: 4.5, k: "COURTSIDE", text: "Three things need you today" },
+    { a: 4.6, b: 8.85, k: "01 · BIRTHDAYS", text: "Never miss a <em>birthday.</em>" },
+    { a: 8.95, b: 14.75, k: "02 · PREGAME", text: "Never walk in <em>cold.</em>" },
+    { a: 14.85, b: 18.85, k: "03 · CONFLICTS", text: "Never double-book a <em>night.</em>" },
+    { a: 18.95, b: 21.7, k: "04 · SOURCES", text: "Reads for context. <em>Never posts.</em>" },
+    { a: 21.8, b: 25.0, k: "05 · CHANNELS", text: "Coming to <em>Telegram, WhatsApp, Slack</em>" },
   ];
 
   const D = (window.__demo = {
     cam: { x: W / 2, y: H / 2, z: 1, vx: 0, vy: 0, vz: 0, tx: 0, ty: 0 },
     camKeys: [],
     cursor: { x: 760, y: 900, moves: [], visible: 0, press: -9, ring: -9 },
-    seen: { alerts: 0, agent: 0, alertIds: new Set() },
+    seen: { alerts: 0, agent: -1, alertIds: new Set() },
     ready: false,
   });
 
@@ -107,9 +107,34 @@
     const cam = document.createElement("div");
     cam.id = "demo-cam";
     win.appendChild(cam);
-    const root = document.getElementById("root");
-    root.parentNode.insertBefore(win, root);
-    cam.appendChild(root);
+    document.body.appendChild(win);
+    // The Next app renders a fragment straight into <body> (there is no #root). Move those
+    // nodes into the window, and keep sending later body insertions (modals, messages) there
+    // so React hydration is already finished before anything is reparented.
+    const isDemo = (n) => n && n.nodeType === 1 && typeof n.id === "string" && n.id.startsWith("demo-");
+    const ap = Node.prototype.appendChild;
+    const ib = Node.prototype.insertBefore;
+    const rc = Node.prototype.removeChild;
+    Node.prototype.appendChild = function (node) {
+      if (this === document.body && !isDemo(node)) return ap.call(cam, node);
+      return ap.call(this, node);
+    };
+    Node.prototype.insertBefore = function (node, ref) {
+      if (this === document.body && !isDemo(node)) {
+        const useRef = ref && ref.parentNode === cam ? ref : null;
+        return ib.call(cam, node, useRef);
+      }
+      return ib.call(this, node, ref);
+    };
+    Node.prototype.removeChild = function (node) {
+      if (node && node.parentNode && node.parentNode !== this) return rc.call(node.parentNode, node);
+      return rc.call(this, node);
+    };
+    for (const n of [...document.body.childNodes]) if (!isDemo(n)) cam.appendChild(n);
+    // The mode line sits on top of the hero once the window is framed. The header already says this is sample data.
+    for (const el of cam.querySelectorAll("span")) {
+      if (/OFFLINE DEMO|LIVE AGENT/.test(el.textContent)) el.style.display = "none";
+    }
 
     const cursor = document.createElement("div");
     cursor.id = "demo-cursor";
@@ -140,14 +165,14 @@
     outro.id = "demo-outro";
     outro.className = "demo-ov";
     outro.innerHTML = `
-      <div id="demo-okick" class="demo-kick" style="color:#F2B63A;margin-bottom:26px">BIRTHDAYS · PREGAME · CONFLICTS · FOLLOW-UPS</div>
+      <div id="demo-okick" class="demo-kick" style="color:#F2B63A;margin-bottom:26px">BIRTHDAYS · PREGAME · CONFLICTS · ASSISTS</div>
       <div class="demo-mask"><div id="demo-o1" class="demo-word" style="font-size:150px;font-stretch:64%;line-height:.92">KNOW YOUR</div></div>
       <div class="demo-mask"><div id="demo-o2" class="demo-word" style="font-size:150px;font-stretch:64%;line-height:.92"><em>PEOPLE.</em></div></div>
       <div id="demo-obrand" style="display:flex;align-items:center;gap:14px;margin-top:44px">
         ${ballCss(40)}
         <div class="demo-word" style="font-size:44px">KOBE<span style="color:#F2B63A">.AI</span></div>
         <div style="width:1px;height:30px;background:rgba(255,255,255,.2);margin:0 8px"></div>
-        <div style="font:500 18px ${mono};letter-spacing:.06em;color:#D9D2C7">kobe-ashen-nu.vercel.app</div>
+        <div style="font:500 18px ${mono};letter-spacing:.06em;color:#D9D2C7">kobeai.vercel.app</div>
       </div>`;
 
     const fade = document.createElement("div");
@@ -165,23 +190,32 @@
     D.ready = true;
   };
 
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", buildDom);
-  else buildDom();
+  // Called after the page has hydrated. Running this from DOMContentLoaded races hydration:
+  // reparenting the server HTML before React takes it crashes the app.
+  D.adopt = () => {
+    if (!D.ready) buildDom();
+  };
 
-  // ---------- element targets ----------
-  const buttons = () => [...document.querySelectorAll("#root button")];
+  // ---------- element targets (the Next.js UI: no #root, Tailwind, copy-not-send) ----------
+  const appRoot = () => document.getElementById("demo-cam") ?? document.body;
+  const buttons = () => [...appRoot().querySelectorAll("button")];
   const btn = (label) => buttons().find((b) => b.textContent.trim() === label);
-  const srcBtn = (name) => buttons().find((b) => b.classList.contains("src") && b.textContent.includes(name));
-  const messages = () => {
-    const col = document.querySelector("#root main > div");
-    return col ? [...col.children].slice(1) : [];
+  const thread = () => appRoot().querySelector("div.mx-auto");
+  const bubbles = () => (thread() ? [...thread().children].filter((el) => el.className.includes("max-w-")) : []);
+  const reveal = (el) => {
+    if (!(el instanceof Element)) return;
+    const scroller = el.closest("aside");
+    if (!scroller) return;
+    const er = el.getBoundingClientRect();
+    const sr = scroller.getBoundingClientRect();
+    if (er.top < sr.top + 4 || er.bottom > sr.bottom - 4) scroller.scrollTop += er.top - sr.top - 12;
   };
-  const alertCard = (title) => [...document.querySelectorAll("#root aside > div")].find((d) => d.textContent.includes(title));
-  const modalPanel = () => {
-    const fixed = [...document.querySelectorAll("#root > div")].filter((d) => getComputedStyle(d).position === "fixed" && d.style.inset);
-    const top = fixed[fixed.length - 1];
-    return top ? top.firstElementChild : null;
+  const alertCard = (title) => {
+    const el = [...appRoot().querySelectorAll("aside > div")].find((d) => d.textContent.includes(title));
+    if (el) reveal(el);
+    return el ?? null;
   };
+  const modalOverlay = () => [...appRoot().querySelectorAll("div")].find((d) => d.className.includes("z-40") && d.className.includes("inset-0")) ?? null;
   const union = (els) => {
     const rs = els.filter(Boolean).map((e) => e.getBoundingClientRect()).filter((r) => r.width > 0);
     if (!rs.length) return null;
@@ -190,26 +224,22 @@
 
   const TARGETS = {
     mayaDraft: () => btn("Draft message"),
-    sendIG: () => btn("Send via Instagram"),
-    sendWA: () => btn("Send via WhatsApp"),
-    input: () => document.querySelector("#root input"),
+    copyIG: () => btn("Copy for Instagram"),
+    copyWA: () => btn("Copy for WhatsApp"),
+    input: () => appRoot().querySelector("textarea"),
     fullReport: () => btn("Full scouting report"),
     closeRecord: () => btn("Close"),
     resolve: () => btn("Resolve"),
-    integrations: () => document.querySelector("#root header button"),
-    linkedin: () => srcBtn("LinkedIn"),
-    zoomSrc: () => srcBtn("Zoom"),
-    tabChannels: () => buttons().find((b) => b.textContent.trim() === "Add Kobe to…" && !b.closest("header")),
-    sentCode: () => btn("I've sent the code"),
+    integrations: () => buttons().find((b) => b.closest("header") && b.textContent.includes("Integrations")),
+    tabChannels: () => {
+      const overlay = modalOverlay();
+      return overlay ? [...overlay.querySelectorAll("button")].find((b) => b.textContent.trim() === "Add Kobe to…") : null;
+    },
     mayaAlert: () => alertCard("Maya Chen turns 29"),
     conflictAlert: () => alertCard("Double-booked"),
-    chatTail: () => {
-      const m = messages();
-      return union(m.slice(-2));
-    },
-    chatTail1: () => union(messages().slice(-1)),
-    modal: () => modalPanel(),
-    lane: () => union([...document.querySelectorAll("#root aside > div")].slice(0, 3)),
+    plan: () => appRoot().querySelector("aside > div"),
+    chatTail: () => union(bubbles().slice(-2)),
+    modal: () => modalOverlay()?.firstElementChild ?? null,
   };
 
   // Screen rect -> page (pre-camera, pre-window) coordinates.
@@ -232,7 +262,8 @@
   D.hits = (name, x, y) => {
     const el = TARGETS[name]?.();
     const hit = document.elementFromPoint(x, y);
-    return el instanceof Element ? !!hit && el.contains(hit) : !!hit;
+    if (el instanceof HTMLButtonElement && el.disabled) return false;
+    return el instanceof Element ? !!hit && (el === hit || el.contains(hit)) : !!hit;
   };
   D.toScreen = (px, py) => ({ x: WIN_X + WIN_S * (D.cam.tx + D.cam.z * px), y: WIN_Y + WIN_S * (D.cam.ty + D.cam.z * py) });
 
@@ -407,14 +438,16 @@
 
   const detectEvents = (t) => {
     const ev = [];
-    for (const d of document.querySelectorAll("#root aside > div")) {
+    for (const d of appRoot().querySelectorAll("aside > div")) {
+      const kind = d.querySelector(".label span.text-chalk")?.textContent?.trim() ?? "";
+      if (!/^(BIRTHDAY|PREGAME|CONFLICT|FOLLOW UP|LIFE UPDATE|ASSIST)$/.test(kind)) continue;
       if (!D.seen.alertIds.has(d)) {
         D.seen.alertIds.add(d);
-        const kind = d.querySelector("span + span")?.textContent ?? "";
         ev.push({ type: "alert", t, kind });
       }
     }
-    const agentCount = messages().filter((m) => m.firstElementChild?.style.maxWidth === "92%").length;
+    const agentCount = bubbles().filter((el) => el.className.includes("max-w-[92%]")).length;
+    if (D.seen.agent < 0) D.seen.agent = agentCount;
     if (agentCount > D.seen.agent) ev.push({ type: "agent", t });
     D.seen.agent = Math.max(D.seen.agent, agentCount);
     return ev;

@@ -1,6 +1,7 @@
 import { Agent } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
+import { connectorInstructions, connectorMailbox, createConnectorTools, liveConnectors, type LiveConnectors, type Mailbox } from "./connectors";
 import { DRAFT_CHANNELS, type Person } from "./data";
 import { SAMPLE_CALENDAR, loadRoster } from "./roster";
 
@@ -8,7 +9,7 @@ import { SAMPLE_CALENDAR, loadRoster } from "./roster";
 // agent can later point at a self-hosted OpenAI-compatible server running the same model.
 const MODEL = process.env.KOBE_MODEL ?? "neon/gpt-oss-120b";
 
-function instructions(roster: Person[]) {
+function instructions(roster: Person[], flags: { gmail: boolean; slack: boolean }) {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   return `You are Kobe, a personal relationship agent. Mamba mentality applied to the people who matter: show up prepared and never miss the small things.
 
@@ -19,7 +20,8 @@ Style: one or two short sentences, warm and direct, with a light basketball flav
 - pregame_brief: before meeting someone, or when asked about a specific person.
 - draft_message: when asked to write, reply, congratulate or wish someone well. Write the body in the user's own voice, specific to that person's details, under 280 characters. Pick the channel they last used.
 - resolve_conflict: when two calendar events overlap. Propose a fix and include a draft to the person affected.
-You cannot send messages. Never say a message was sent; the user copies the draft from the card and sends it themselves. After a tool returns, do not repeat what the card shows.
+The draft_message card is something the user copies and sends. Never say that card was sent. After a tool returns, do not repeat what the card shows.
+${connectorInstructions(flags)}
 
 ROSTER:
 ${JSON.stringify(roster)}
@@ -28,8 +30,11 @@ CALENDAR:
 ${JSON.stringify(SAMPLE_CALENDAR)}`;
 }
 
-export async function buildKobeAgent() {
+export async function buildKobeAgent(options?: { connectors?: LiveConnectors; mailbox?: Mailbox }) {
   const roster = await loadRoster();
+  const connectors = options?.connectors ?? (await liveConnectors());
+  const mailbox = options?.mailbox ?? connectorMailbox;
+  const flags = { gmail: connectors.gmail !== null, slack: connectors.slack !== null };
   const [first, ...rest] = roster.map((r) => r.id);
   if (!first) throw new Error("Kobe needs at least one person in the roster.");
   const personId = z.enum([first, ...rest]);
@@ -86,8 +91,14 @@ export async function buildKobeAgent() {
   return new Agent({
     id: "kobe",
     name: "Kobe",
-    instructions: instructions(roster),
+    instructions: instructions(roster, flags),
     model: MODEL,
-    tools: { show_people, pregame_brief, draft_message, resolve_conflict },
+    tools: {
+      show_people,
+      pregame_brief,
+      draft_message,
+      resolve_conflict,
+      ...createConnectorTools({ gmail: connectors.gmail, slack: connectors.slack, mailbox }),
+    },
   });
 }

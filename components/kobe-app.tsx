@@ -11,12 +11,13 @@ import {
 import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
 import { Dithering } from "@paper-design/shaders-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
+import { connectorBadge, type ConnectorFlags } from "@/lib/connectors";
 import { CHANNELS, ENGINE, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
 import { game, registerAsk, useGame } from "@/lib/game";
 import { CourtShader } from "./court-shader";
-import { BriefCard, ConflictCard, DraftCard, PeopleCard } from "./tool-cards";
+import { BriefCard, ConflictCard, ConnectorDraftCard, ConnectorSendCard, DraftCard, GmailSearchCard, PeopleCard, SlackSearchCard } from "./tool-cards";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any conflicts this week?", "Who haven't I talked to lately?"];
@@ -26,6 +27,9 @@ const transport = new AssistantChatTransport({ api: "/api/chat" });
 
 type Wiring = { roster: Person[]; persisted: boolean };
 
+const ConnectorStatus = createContext<ConnectorFlags>({ gmail: false, slack: false });
+const useConnectorStatus = () => useContext(ConnectorStatus);
+
 function useWire(runtime: AssistantRuntime, { roster, persisted }: Wiring) {
   useEffect(() => {
     registerAsk((text) => runtime.thread.append({ role: "user", content: [{ type: "text", text }] }));
@@ -34,25 +38,26 @@ function useWire(runtime: AssistantRuntime, { roster, persisted }: Wiring) {
   }, [runtime, roster, persisted]);
 }
 
-function LiveKobe({ model, ...wiring }: Wiring & { model: string }) {
+function LiveKobe({ model, connectors, ...wiring }: Wiring & { model: string; connectors: ConnectorFlags }) {
   const runtime = useChatRuntime({ transport });
   useWire(runtime, wiring);
-  return <Court runtime={runtime} engine={`LIVE AGENT · ${model.replace(/^neon\//, "").toUpperCase()} · SAMPLE FEED & CALENDAR`} />;
+  return <Court runtime={runtime} connectors={connectors} engine={`LIVE AGENT · ${model.replace(/^neon\//, "").toUpperCase()} · SAMPLE FEED & CALENDAR`} />;
 }
 
-function ScriptedKobe(wiring: Wiring) {
+function ScriptedKobe({ connectors, ...wiring }: Wiring & { connectors: ConnectorFlags }) {
   const runtime = useLocalRuntime(kobeAdapter);
   useWire(runtime, wiring);
-  return <Court runtime={runtime} engine="OFFLINE DEMO · SCRIPTED AGENT · SAMPLE DATA" />;
+  return <Court runtime={runtime} connectors={connectors} engine="OFFLINE DEMO · SCRIPTED AGENT · SAMPLE DATA" />;
 }
 
-export function KobeApp({ live, model, ...wiring }: Wiring & { live: boolean; model: string }) {
-  return live ? <LiveKobe model={model} {...wiring} /> : <ScriptedKobe {...wiring} />;
+export function KobeApp({ live, model, connectors, ...wiring }: Wiring & { live: boolean; model: string; connectors: ConnectorFlags }) {
+  return live ? <LiveKobe model={model} connectors={connectors} {...wiring} /> : <ScriptedKobe connectors={connectors} {...wiring} />;
 }
 
-function Court({ runtime, engine }: { runtime: AssistantRuntime; engine: string }) {
+function Court({ runtime, engine, connectors }: { runtime: AssistantRuntime; engine: string; connectors: ConnectorFlags }) {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+      <ConnectorStatus.Provider value={connectors}>
       <span className="label pointer-events-none fixed top-[calc(var(--header-h)-4px)] right-5 left-5 z-20 truncate text-[9.5px] text-chalk-3">{engine}</span>
       <CourtShader />
       <div className="grain" aria-hidden />
@@ -62,6 +67,7 @@ function Court({ runtime, engine }: { runtime: AssistantRuntime; engine: string 
       <Lane />
       <Integrations />
       <RecordModal />
+      </ConnectorStatus.Provider>
     </AssistantRuntimeProvider>
   );
 }
@@ -113,7 +119,7 @@ function Header() {
       <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
         <button onClick={() => game.openModal("sources")} className="glass press flex h-[38px] flex-none items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold whitespace-nowrap">
           Integrations
-          <span className="label rounded-md bg-gold/20 px-1.5 py-0.5 text-gold">SOON</span>
+          <IntegrationsBadge />
         </button>
         <button onClick={() => game.openModal("channels")} className="press flex h-[38px] flex-none items-center gap-2 rounded-full bg-chalk px-4 text-[13px] font-bold whitespace-nowrap text-ink">
           Add Kobe to…
@@ -250,7 +256,7 @@ function Hero() {
         ))}
       </h1>
       <p className="max-w-[520px] text-base leading-normal text-chalk-2 [text-wrap:pretty]">
-        Never miss a birthday, double-book a night, or walk into a conversation cold. This demo runs on a sample roster, feed and calendar. Inbox and social integrations are not connected yet.
+        Never miss a birthday, double-book a night, or walk into a conversation cold. This demo runs on a sample roster, feed and calendar. <HeroConnectors />
       </p>
       <div className="mt-1.5 flex flex-wrap gap-2">
         {CHIPS.map((c, i) => (
@@ -321,6 +327,12 @@ function AssistantMessage() {
                   pregame_brief: BriefCard,
                   draft_message: DraftCard,
                   resolve_conflict: ConflictCard,
+                  gmail_search: GmailSearchCard,
+                  gmail_draft: ConnectorDraftCard,
+                  gmail_send: ConnectorSendCard,
+                  slack_search: SlackSearchCard,
+                  slack_draft: ConnectorDraftCard,
+                  slack_send: ConnectorSendCard,
                 },
               },
             }}
@@ -562,8 +574,45 @@ function Soon() {
   return <span className="label flex-none rounded-md bg-white/[.07] px-1.5 py-0.5 text-[10px] text-chalk-3">SOON</span>;
 }
 
+function IntegrationsBadge() {
+  const connected = useConnectorStatus();
+  if (connected.gmail || connected.slack) return <span className="label rounded-md bg-green/20 px-1.5 py-0.5 text-green">ON</span>;
+  return <span className="label rounded-md bg-gold/20 px-1.5 py-0.5 text-gold">SOON</span>;
+}
+
+function HeroConnectors() {
+  const connected = useConnectorStatus();
+  if (!connected.gmail && !connected.slack) return <>Inbox and social integrations are not connected yet.</>;
+  const names = [connected.gmail ? "Gmail" : null, connected.slack ? "Slack" : null].filter((name): name is string => !!name);
+  const verb = names.length > 1 ? "are" : "is";
+  return (
+    <>
+      {names.join(" and ")} {verb} connected for search and drafts. Sending waits for an explicit confirm. Luma stays disconnected.
+    </>
+  );
+}
+
+function ConnectorMark({ id }: { id: string }) {
+  const connected = useConnectorStatus();
+  if (connectorBadge(id, connected) === "on") {
+    return <span className="label flex-none rounded-md bg-green/20 px-1.5 py-0.5 text-[10px] text-green">ON</span>;
+  }
+  return <Soon />;
+}
+
+function connectedBlurb(connected: ConnectorFlags, where: "sources" | "channels") {
+  const names = [connected.gmail ? "Gmail" : null, connected.slack ? "Slack" : null].filter((name): name is string => !!name);
+  if (names.length === 0) return null;
+  const verb = names.length > 1 ? "are" : "is";
+  if (where === "sources") {
+    return `${names.join(" and ")} ${verb} connected. Kobe can search and draft there, and sending waits for an explicit confirm. Luma stays disconnected. Notion, Linear, Drive, and Apify are not used.`;
+  }
+  return `${names.join(" and ")} ${verb} connected for search and drafts. Sending waits for an explicit confirm. The other channels are still coming soon.`;
+}
+
 function Integrations() {
   const modal = useGame((s) => s.modal);
+  const connected = useConnectorStatus();
   const close = () => game.openModal(null);
   const tab = modal === "channels" ? "channels" : "sources";
   return (
@@ -587,7 +636,8 @@ function Integrations() {
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Scouting sources</div>
               <div className="text-sm text-[#BDB5AA]">
-                None of these are connected yet. Kobe will read them to build context and never post on your behalf. Today it runs on a sample roster, feed and calendar.
+                {connectedBlurb(connected, "sources") ??
+                  "None of these are connected yet. Kobe will read them to build context and never post on your behalf. Today it runs on a sample roster, feed and calendar."}
               </div>
             </div>
             {SOURCE_GROUPS.map((g) => (
@@ -601,7 +651,7 @@ function Integrations() {
                         <span className="text-sm font-semibold">{it.name}</span>
                         <span className="truncate text-xs text-[#ACA397]">{it.desc}</span>
                       </span>
-                      <Soon />
+                      <ConnectorMark id={it.id} />
                     </div>
                   ))}
                 </div>
@@ -623,7 +673,9 @@ function Integrations() {
           <>
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Put Kobe in your rotation</div>
-              <div className="text-sm text-[#BDB5AA]">Coming soon: talk to Kobe wherever you already message. For now Kobe lives on this page.</div>
+              <div className="text-sm text-[#BDB5AA]">
+                {connectedBlurb(connected, "channels") ?? "Coming soon: talk to Kobe wherever you already message. For now Kobe lives on this page."}
+              </div>
             </div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2">
               {CHANNELS.map((ch) => (
@@ -633,7 +685,7 @@ function Integrations() {
                     <span className="text-sm font-semibold">{ch.name}</span>
                     <span className="truncate text-xs text-[#ACA397]">{ch.desc}</span>
                   </span>
-                  <Soon />
+                  <ConnectorMark id={ch.id} />
                 </div>
               ))}
             </div>

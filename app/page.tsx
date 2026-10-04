@@ -12,11 +12,6 @@ export default async function Page() {
   const api = access().mode !== "locked";
   const live = api && !!process.env.NEON_AI_GATEWAY_TOKEN && !!process.env.NEON_AI_GATEWAY_BASE_URL;
   return (
-    <KobeApp
-      live={live}
-      persisted={api && !!sql}
-      roster={api ? await loadRoster() : SEED_ROSTER}
-      model={process.env.KOBE_MODEL ?? "neon/gpt-oss-120b"}
-    />
+    <KobeApp live={live} persisted={api && !!sql} roster={api ? await loadRoster() : SEED_ROSTER} />
   );
 }

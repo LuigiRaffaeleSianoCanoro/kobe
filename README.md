@@ -51,6 +51,21 @@ Then load the schema. It is safe to re-run after pulling changes:
 psql "$DATABASE_URL" -f db/schema.sql
 ```
 
+## Import a WhatsApp chat
+
+With Postgres set up, Kobe can store a WhatsApp chat on the matching person's record. Export the chat without media and keep the file name WhatsApp gives it:
+
+- **iPhone:** open the chat, tap the name at the top, then Export Chat → Without Media. You get a `.zip`.
+- **Android:** open the chat, then ⋮ → More → Export chat → Without media. You get a `.txt`.
+
+```bash
+pnpm import:whatsapp "WhatsApp Chat - Valentina Ríos.zip"
+```
+
+It prints how many messages it stored, for whom, and the date range. Importing the same export again stores nothing new. A 1:1 chat goes onto the person with that name, and if nobody matches, Kobe adds them as "New from WhatsApp" for you to review. In a group chat, only senders already in your people are linked.
+
+Set `KOBE_OWNER_NAME` in `.env.local` to your name as WhatsApp shows it, or pass `--owner "Your Name"`, so your own messages are marked as yours. Times are read as `America/Argentina/Buenos_Aires` unless you set `KOBE_TIME_ZONE` or pass `--tz`. Photos and other media are not imported.
+
 ## Access
 
 `/api/chat` spends your gateway credits and `/api/season` reads and writes your records. A production server (`next start` or Docker) only serves them when `KOBE_PASSWORD` is set, and then asks for that password in the browser before showing anything. Without `KOBE_PASSWORD`, production serves the offline demo with the sample roster and never touches the database or the gateway. `pnpm dev` stays open, so keep it on your own machine.

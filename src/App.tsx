@@ -265,7 +265,7 @@ export default function App() {
   return (
     <>
       <Court />
-      <header ref={headerRef} style={{ position: "fixed", top: 0, left: 0, right: 0, minHeight: 68, boxSizing: "border-box", display: "flex", flexWrap: "wrap", alignItems: "center", alignContent: "center", columnGap: 12, rowGap: 8, padding: "0 16px", zIndex: 20 }}>
+      <header ref={headerRef} style={{ position: "fixed", top: 0, left: 0, right: 0, minHeight: 68, boxSizing: "border-box", display: "flex", flexWrap: "wrap", alignItems: "center", alignContent: "center", columnGap: 8, rowGap: 8, padding: "0 16px", zIndex: 20 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "none" }}>
           <Ball size={26} shadow="0 2px 10px rgba(224,113,42,.45)" />
           <div style={{ fontWeight: 800, fontStretch: "72%", fontSize: 24, letterSpacing: ".01em", lineHeight: 1, whiteSpace: "nowrap" }}>

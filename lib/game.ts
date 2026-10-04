@@ -37,6 +37,8 @@ type GameState = {
   floaters: Floater[];
   plans: Plan[];
   planStorage: PlanStorage;
+  // Read out by screen readers when an import finishes.
+  notice: string;
 };
 
 const NO_PLAYS: Record<PlayId, boolean> = { maya: false, marcus: false, dev: false };
@@ -63,6 +65,7 @@ function initialState(): GameState {
     floaters: [],
     plans: [],
     planStorage: "browser",
+    notice: "",
   };
 }
 
@@ -342,6 +345,12 @@ export const game = {
     });
     sync();
   },
+  // After a WhatsApp import: everyone in the returned roster is stored on the server, including new contacts.
+  mergeServerRoster(roster: Person[]) {
+    for (const person of roster) serverIds.add(person.id);
+    game.mergePeople(roster);
+  },
+  notify: (notice: string) => set({ notice }),
 
   upsertPerson(person: Person) {
     if (persisted && person.id) serverIds.add(person.id);

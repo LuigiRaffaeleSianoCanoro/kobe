@@ -1,12 +1,13 @@
 "use client";
 
-import type { ToolCallMessagePartProps } from "@assistant-ui/react";
+import type { DataMessagePartProps, ToolCallMessagePartProps } from "@assistant-ui/react";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { deliverDraft } from "@/lib/connectors";
 import { isDraftChannel } from "@/lib/data";
 import { game, useGame } from "@/lib/game";
 import { planDetail, planFromToolArgs, planIdForCard, recordSupports, samePlan, type PlanCondition, type PlanKind } from "@/lib/plans";
+import type { ImportCard as Imported } from "@/lib/whatsapp/upload";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 
@@ -562,6 +563,35 @@ export function ConflictCard({ args, toolCallId, status }: ToolCallMessagePartPr
       </div>
       <div className="h-px bg-white/10" />
       <DraftBody draft={c.draft ?? {}} logKey={toolCallId} ready={status.type !== "running"} />
+    </CardIn>
+  );
+}
+
+// Posted by the page itself after /api/imports/whatsapp stores a chat, never by the model.
+export function ImportCard(part: DataMessagePartProps) {
+  const data = part.data as Imported;
+  const roster = useGame((s) => s.people);
+  const people = data.people.filter((p) => roster[p.id]);
+  const added = data.people.filter((p) => p.created).map((p) => p.name);
+  return (
+    <CardIn className="glass flex flex-col gap-3 rounded-2xl p-4">
+      <div className="flex items-center gap-2">
+        <span className="h-2 w-2 rounded-full bg-green shadow-[0_0_12px_var(--green)]" />
+        <span className="label text-green">WHATSAPP · CHAT IMPORTED</span>
+        <span className="label ml-auto text-chalk-3">{data.range}</span>
+      </div>
+      <p className="text-[15px] leading-normal [text-wrap:pretty]">{data.summary}</p>
+      {added.length > 0 && <p className="text-[12.5px] text-[#BDB5AA]">New on your roster, marked for review: {added.join(", ")}.</p>}
+      {data.isGroup && people.length === 0 && <p className="text-[12.5px] text-[#BDB5AA]">Nobody in this group is on your roster yet.</p>}
+      {people.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {people.map((p) => (
+            <button key={p.id} onClick={() => game.openRecord(p.id)} className="press rounded-full bg-chalk px-3.5 py-2 text-[12.5px] font-bold text-ink">
+              {people.length > 1 ? p.name : "Open scouting report"}
+            </button>
+          ))}
+        </div>
+      )}
     </CardIn>
   );
 }

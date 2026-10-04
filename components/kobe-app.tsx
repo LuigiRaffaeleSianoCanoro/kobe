@@ -3,6 +3,7 @@
 import {
   ActionBarPrimitive,
   AssistantRuntimeProvider,
+  AttachmentPrimitive,
   AuiIf,
   ComposerPrimitive,
   ErrorPrimitive,
@@ -16,9 +17,9 @@ import {
   type EmptyMessagePartProps,
 } from "@assistant-ui/react";
 import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
-import { Mic, Square, Volume2, VolumeX } from "lucide-react";
+import { Mic, Paperclip, Square, Volume2, VolumeX } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
-import { createContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { createContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type MouseEvent, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
 import { coachingPayload } from "@/lib/coaching-memory";
 import { isLiveConnector, type ConnectorFlags } from "@/lib/connectors";
@@ -27,12 +28,13 @@ import { game, registerAsk, useGame } from "@/lib/game";
 import { weeklyMixtape, type TouchNote } from "@/lib/highlights";
 import { NOTE_MAX, clipFrom } from "@/lib/tape";
 import { LANG_NAMES, dictation, speech, useHydrated, useVoice, voice } from "@/lib/voice";
+import { describeImport, whatsAppAttachments, type ImportResult } from "@/lib/whatsapp/upload";
 import { browserRoster, RosterControl } from "./roster-panel";
 import { CourtShader } from "./court-shader";
 import { HighlightsCard, MixtapeView } from "./mixtape";
 import { SavedPlanList, SetPlan } from "./plan-panel";
 import { ServiceLogo } from "./service-logo";
-import { BriefCard, ConflictCard, ConnectorDraftCard, ConnectorSendCard, DraftCard, GmailSearchCard, PeopleCard, PlanCard, SlackSearchCard } from "./tool-cards";
+import { BriefCard, ConflictCard, ConnectorDraftCard, ConnectorSendCard, DraftCard, GmailSearchCard, ImportCard, PeopleCard, PlanCard, SlackSearchCard } from "./tool-cards";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any conflicts this week?", "Who haven't I talked to lately?", "Remind me before Maya's birthday", "This week's mixtape"];
@@ -52,15 +54,47 @@ const transport = new AssistantChatTransport({
     }
   },
 });
-const adapters = { dictation, speech };
+let postImport: (result: ImportResult, file: { id: string; name: string }) => void = () => {};
+// WhatsApp imports need the database. Without one the composer takes no files at all: an explicit
+// undefined also turns off the AI SDK runtime's default adapter, which would send files to the model.
+const WITH_IMPORTS = { dictation, speech, attachments: whatsAppAttachments((result, file) => postImport(result, file)) };
+const NO_FILES = { dictation, speech, attachments: undefined };
 
 type Wiring = { roster: Person[]; persisted: boolean; touches?: TouchNote[] };
 
 const ConnectorStatus = createContext<ConnectorFlags>({ gmail: false, slack: false });
 
+const idle = (runtime: AssistantRuntime) =>
+  new Promise<void>((resolve) => {
+    const unsubscribe = runtime.thread.subscribe(() => {
+      if (runtime.thread.getState().isRunning) return;
+      unsubscribe();
+      resolve();
+    });
+    if (!runtime.thread.getState().isRunning) {
+      unsubscribe();
+      resolve();
+    }
+  });
+
 function useWire(runtime: AssistantRuntime, { roster, persisted, touches = [] }: Wiring) {
   useEffect(() => {
     registerAsk((text) => runtime.thread.append({ role: "user", content: [{ type: "text", text }] }));
+    postImport = async ({ report, roster }, file) => {
+      game.mergeServerRoster(roster);
+      const card = describeImport(report);
+      game.notify(card.summary);
+      const composer = runtime.thread.composer;
+      // Let the adapter's add() finish before dropping its chip.
+      setTimeout(() => {
+        const index = composer.getState().attachments.findIndex((a) => a.id === file.id);
+        if (index >= 0) composer.getAttachmentByIndex(index).remove();
+      });
+      // A streaming reply rewrites the last message, so post the card once Kobe is done talking.
+      await idle(runtime);
+      runtime.thread.append({ role: "user", content: [{ type: "text", text: file.name }], startRun: false });
+      runtime.thread.append({ role: "assistant", content: [{ type: "data", name: "whatsapp-import", data: card }], startRun: false });
+    };
     // Postgres is the roster the agent and the season log share. Without it, records stay in this browser.
     game.load(persisted ? roster : browserRoster(roster), persisted, touches);
     return game.startFeed();
@@ -68,12 +102,14 @@ function useWire(runtime: AssistantRuntime, { roster, persisted, touches = [] }:
 }
 
 function LiveKobe({ connectors, ...wiring }: Wiring & { connectors: ConnectorFlags }) {
+  const adapters = wiring.persisted ? WITH_IMPORTS : NO_FILES;
   const runtime = useChatRuntime({ transport, adapters });
   useWire(runtime, wiring);
   return <Court runtime={runtime} persisted={wiring.persisted} connectors={connectors} />;
 }
 
 function RecordsKobe({ connectors, ...wiring }: Wiring & { connectors: ConnectorFlags }) {
+  const adapters = wiring.persisted ? WITH_IMPORTS : NO_FILES;
   const runtime = useLocalRuntime(kobeAdapter, { adapters });
   useWire(runtime, wiring);
   return <Court runtime={runtime} persisted={wiring.persisted} connectors={connectors} />;
@@ -87,17 +123,20 @@ function Court({ runtime, persisted, connectors }: { runtime: AssistantRuntime; 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ConnectorStatus.Provider value={connectors}>
+      {/* A file dropped anywhere on the page goes to the composer instead of replacing the page. */}
+      <ComposerPrimitive.AttachmentDropzone className="group/drop contents">
       <CourtShader />
       <div className="grain" aria-hidden />
       <VoiceReplies />
       <Header persisted={persisted} />
       <Thread />
-      <Composer />
+      <Composer imports={persisted} />
       <Lane />
-      <Integrations />
+      <Integrations imports={persisted} />
       <HighlightsModal />
       <GameTape />
       <RecordModal />
+      </ComposerPrimitive.AttachmentDropzone>
       </ConnectorStatus.Provider>
     </AssistantRuntimeProvider>
   );
@@ -372,6 +411,7 @@ function AssistantMessage() {
                   slack_send: ConnectorSendCard,
                 },
               },
+              data: { by_name: { "whatsapp-import": ImportCard } },
             }}
           />
           <MessagePrimitive.Error>
@@ -476,7 +516,65 @@ function placeholderThatFits(el: HTMLTextAreaElement) {
   return `${kept}…`;
 }
 
-function Composer() {
+// Opens the file picker; the chosen export goes through the composer like a dropped file.
+function PickExport({ onPick, ...button }: Omit<ComponentProps<"button">, "onClick"> & { onPick?: () => void }) {
+  const aui = useAui();
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <button type="button" {...button} onClick={() => input.current?.click()} />
+      <input
+        ref={input}
+        type="file"
+        accept=".zip,.txt"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (!file) return;
+          onPick?.();
+          // A failed import shows its error on the chip.
+          aui.composer.addAttachment(file).catch(() => {});
+        }}
+      />
+    </>
+  );
+}
+
+function ImportChips() {
+  const notice = useGame((s) => s.notice);
+  return (
+    <div aria-live="polite" className="mb-2 flex flex-col items-start gap-1.5">
+      <ComposerPrimitive.Attachments>
+        {({ attachment: a }) => (
+          <AttachmentPrimitive.Root className="glass flex max-w-full items-center gap-2.5 rounded-2xl bg-[rgba(16,12,20,.94)]! py-2 pr-2 pl-3.5 text-[13px] leading-snug">
+            {a.status.type === "incomplete" ? (
+              <>
+                <span className="h-2 w-2 flex-none rounded-full bg-red" />
+                <span className="min-w-0 [text-wrap:pretty]">
+                  <span className="font-semibold">Couldn&apos;t import <AttachmentPrimitive.Name />.</span> {a.status.message}
+                </span>
+                <AttachmentPrimitive.Remove aria-label="Dismiss import error" className="press grid h-[22px] w-[22px] flex-none place-items-center rounded-full bg-white/[.06] text-sm text-chalk-2">
+                  ×
+                </AttachmentPrimitive.Remove>
+              </>
+            ) : (
+              <>
+                <span className="h-2 w-2 flex-none rounded-full bg-gold motion-safe:animate-pulse" />
+                <span className="min-w-0 truncate pr-1.5">
+                  Importing <AttachmentPrimitive.Name />…
+                </span>
+              </>
+            )}
+          </AttachmentPrimitive.Root>
+        )}
+      </ComposerPrimitive.Attachments>
+      <p className="sr-only">{notice}</p>
+    </div>
+  );
+}
+
+function Composer({ imports }: { imports: boolean }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const [placeholder, setPlaceholder] = useState(`${PLACEHOLDER}…`);
   useLayoutEffect(() => {
@@ -492,7 +590,18 @@ function Composer() {
   return (
     <div className="fixed right-0 bottom-[22px] left-0 z-10 px-4 min-[1000px]:right-[380px]">
       <VoiceNotice />
-      <ComposerPrimitive.Root className="glass mx-auto flex max-w-[720px] items-center gap-2.5 rounded-full py-2 pr-2 pl-5 shadow-[0_24px_60px_rgba(0,0,0,.5)]">
+      <div className="mx-auto max-w-[720px]">
+        {imports && <ImportChips />}
+        <p className="label mb-2 hidden w-fit rounded-full bg-gold px-3 py-1.5 text-ink group-data-[dragging=true]/drop:block">Drop a WhatsApp export to import it</p>
+      </div>
+      <ComposerPrimitive.Root
+        className={`glass mx-auto flex max-w-[720px] items-center gap-2.5 rounded-full py-2 pr-2 shadow-[0_24px_60px_rgba(0,0,0,.5)] group-data-[dragging=true]/drop:outline-2 group-data-[dragging=true]/drop:outline-gold ${imports ? "pl-2" : "pl-5"}`}
+      >
+        {imports && (
+          <PickExport aria-label="Import a WhatsApp chat export" title="Import a WhatsApp chat (.zip or .txt)" className="press grid h-10 w-10 flex-none place-items-center rounded-full text-chalk-2 hover:bg-white/[.06]">
+            <Paperclip size={18} aria-hidden />
+          </PickExport>
+        )}
         <ComposerPrimitive.Input
           ref={input}
           rows={1}
@@ -813,7 +922,52 @@ function connectedNote() {
   return `${names.join(" and ")} ${verb} connected. Sending waits for an explicit confirm.`;
 }
 
-function Integrations() {
+const EXPORT_STEPS = [
+  { phone: "iPhone", steps: ["Open the chat in WhatsApp.", "Tap the contact's name at the top.", "Export Chat → Without Media."] },
+  { phone: "Android", steps: ["Open the chat in WhatsApp.", "Tap ⋮ → More.", "Export chat → Without media."] },
+];
+
+function WhatsAppImport({ imports, onPick }: { imports: boolean; onPick: () => void }) {
+  return (
+    <div className="flex flex-col gap-2.5">
+      <span className="label text-gold">MESSAGES</span>
+      <div className="flex flex-col gap-3.5 rounded-[14px] border border-white/[.08] bg-white/[.035] p-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.07] text-[#CFC7BB]"><ServiceLogo id="whatsapp" size={22} /></span>
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="text-sm font-semibold">WhatsApp</span>
+            <span className="text-xs text-[#ACA397]">{imports ? "Import a chat export, one person or group at a time" : "Importing chats needs a database (DATABASE_URL)"}</span>
+          </span>
+          {imports ? (
+            <PickExport onPick={onPick} className="press h-[34px] flex-none rounded-full bg-chalk px-3.5 text-[13px] font-bold text-ink">
+              Import a chat
+            </PickExport>
+          ) : (
+            <NotConnected />
+          )}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {EXPORT_STEPS.map(({ phone, steps }) => (
+            <div key={phone} className="flex flex-col gap-1.5">
+              <span className="label text-[9.5px] text-chalk-3">ON {phone}</span>
+              <ol className="flex flex-col gap-1 text-[13px] leading-snug text-[#CFC7BB]">
+                {steps.map((step, i) => (
+                  <li key={step} className="flex gap-2">
+                    <span className="label flex-none pt-px text-gold">{i + 1}</span>
+                    {step}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ))}
+        </div>
+        <span className="text-xs text-[#ACA397]">Get the .zip or .txt onto this computer, then pick it here or drop it on the chat.</span>
+      </div>
+    </div>
+  );
+}
+
+function Integrations({ imports }: { imports: boolean }) {
   const modal = useGame((s) => s.modal);
   const close = () => game.openModal(null);
   const open = modal === "sources" || modal === "channels";
@@ -843,8 +997,10 @@ function Integrations() {
               <div className="display text-[38px]">Scouting sources</div>
               <div className="text-sm text-[#BDB5AA]">
                 {connectedNote() ?? "No account is connected. Chat answers from the records stored here."}
+                {imports ? " WhatsApp chats can be imported from an export." : ""}
               </div>
             </div>
+            <WhatsAppImport imports={imports} onPick={close} />
             {SOURCE_GROUPS.map((g) => (
               <div key={g.name} className="flex flex-col gap-2.5">
                 <span className="label text-gold">{g.name}</span>
@@ -1076,20 +1232,23 @@ function RecordModal() {
             ].map(([k, v]) => (
               <div key={k} className="contents">
                 <span className="label pt-0.5 text-chalk-3">{k}</span>
-                <span>{v}</span>
+                <span>{v || "—"}</span>
               </div>
             ))}
           </div>
-          <div className="flex flex-col gap-2">
-            <span className="label text-gold">TALKING POINTS</span>
-            {r.points.map((pt) => (
-              <div key={pt} className="flex gap-2.5 text-sm leading-snug text-[#E6E0D7]">
-                <span className="mt-[7px] h-1.5 w-1.5 flex-none rotate-45 bg-gold" />
-                <span>{pt}</span>
-              </div>
-            ))}
-          </div>
-          <div className="rounded-xl bg-gold/10 px-3.5 py-3 text-[13.5px] leading-snug text-[#F4E3BC]">Open loop: {r.loop}</div>
+          {/* Someone new from a WhatsApp import has no talking points or open loop yet. */}
+          {r.points.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <span className="label text-gold">TALKING POINTS</span>
+              {r.points.map((pt) => (
+                <div key={pt} className="flex gap-2.5 text-sm leading-snug text-[#E6E0D7]">
+                  <span className="mt-[7px] h-1.5 w-1.5 flex-none rotate-45 bg-gold" />
+                  <span>{pt}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {r.loop && <div className="rounded-xl bg-gold/10 px-3.5 py-3 text-[13.5px] leading-snug text-[#F4E3BC]">Open loop: {r.loop}</div>}
           <CoachingNote personId={r.id} />
           <div className="flex flex-col gap-2">
             <span className="label text-gold">Triggers & routines</span>

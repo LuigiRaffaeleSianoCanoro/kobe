@@ -66,6 +66,8 @@ With Postgres set up, Kobe can store a WhatsApp chat on the matching person's re
 - **iPhone:** open the chat, tap the name at the top, then Export Chat → Without Media. You get a `.zip`.
 - **Android:** open the chat, then ⋮ → More → Export chat → Without media. You get a `.txt`.
 
+In the app, drop the file on the chat, pick it with the paperclip next to the message box, or open Integrations → WhatsApp → Import a chat. The server parses and stores it, and Kobe answers with a card that links to the person's scouting report. From a terminal:
+
 ```bash
 pnpm import:whatsapp "WhatsApp Chat - Valentina Ríos.zip"
 ```
@@ -76,7 +78,7 @@ Set `KOBE_OWNER_NAME` in `.env.local` to your name as WhatsApp shows it, or pass
 
 ## Access
 
-`/api/chat` spends your gateway credits and `/api/season` reads and writes your records. A production server (`next start` or Docker) only serves them when `KOBE_PASSWORD` is set, and then asks for that password in the browser before showing anything. Without `KOBE_PASSWORD`, production serves the sample roster and never touches the database or the gateway. `pnpm dev` stays open, so keep it on your own machine.
+`/api/chat` spends your gateway credits, and `/api/season` and `/api/imports` read and write your records. A production server (`next start` or Docker) only serves them when `KOBE_PASSWORD` is set, and then asks for that password in the browser before showing anything. Without `KOBE_PASSWORD`, production serves the sample roster and never touches the database or the gateway. `pnpm dev` stays open, so keep it on your own machine.
 
 ## Self-host
 

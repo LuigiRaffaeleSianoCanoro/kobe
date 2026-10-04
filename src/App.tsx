@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CHIPS, D, INITIAL_SOURCES, PAIR_CODE, VOICE_LINES, type AlertAction, type FeedItem } from "./data";
 import { reply, type AgentReply } from "./agent";
 import { Court } from "./Court";
@@ -8,6 +8,26 @@ type LiveAlert = FeedItem & { id: number; visible: boolean };
 
 const mono = "'JetBrains Mono', monospace";
 const glass = "rgba(16,12,20,.66)";
+const COMPOSER_PLACEHOLDER = "Ask Kobe about anyone you know…";
+
+let placeholderMeasure: CanvasRenderingContext2D | null = null;
+
+function placeholderThatFits(text: string, maxWidth: number, font: string) {
+  if (typeof document === "undefined" || maxWidth <= 0) return text;
+  if (!placeholderMeasure) placeholderMeasure = document.createElement("canvas").getContext("2d");
+  const ctx = placeholderMeasure;
+  if (!ctx) return text;
+  ctx.font = font;
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  const words = text.split(" ");
+  let kept = "";
+  for (const word of words) {
+    const next = kept ? `${kept} ${word}` : word;
+    if (ctx.measureText(`${next}…`).width > maxWidth) break;
+    kept = next;
+  }
+  return kept ? `${kept}…` : "…";
+}
 
 function Ball({ size, shadow }: { size: number; shadow?: string }) {
   const seam = size >= 40 ? 2 : 1.5;
@@ -27,6 +47,7 @@ function Diamond() {
 
 export default function App() {
   const scrollRef = useRef<HTMLElement>(null);
+  const composerRef = useRef<HTMLInputElement>(null);
   const timers = useRef<number[]>([]);
   const recInt = useRef<number | null>(null);
   const voiceI = useRef(-1);
@@ -34,6 +55,7 @@ export default function App() {
 
   const [vw, setVw] = useState(window.innerWidth);
   const [input, setInput] = useState("");
+  const [composerPlaceholder, setComposerPlaceholder] = useState(COMPOSER_PLACEHOLDER);
   const [typing, setTyping] = useState(false);
   const [modal, setModal] = useState<null | "sources" | "channels">(null);
   const [record, setRecord] = useState<string | null>(null);
@@ -112,6 +134,24 @@ export default function App() {
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [messages.length, typing]);
+
+  useLayoutEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    const fit = () => {
+      const next = placeholderThatFits(COMPOSER_PLACEHOLDER, el.clientWidth - 2, getComputedStyle(el).font);
+      setComposerPlaceholder((prev) => (prev === next ? prev : next));
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    let alive = true;
+    document.fonts?.ready.then(() => { if (alive) fit(); }).catch(() => {});
+    return () => {
+      alive = false;
+      observer.disconnect();
+    };
+  }, [rec, vw]);
 
   const startRec = () => {
     setRec(true);
@@ -293,7 +333,7 @@ export default function App() {
       <div style={{ position: "fixed", left: 0, right: lane.chatRight, bottom: 22, zIndex: 10, padding: "0 16px" }}>
         <div style={{ maxWidth: 720, margin: "0 auto", display: "flex", alignItems: "center", gap: 10, padding: "8px 8px 8px 20px", borderRadius: 999, background: "rgba(16,12,20,.72)", backdropFilter: "blur(20px) saturate(150%)", border: "1px solid rgba(255,255,255,.12)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
           {!rec ? (
-            <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runAgent(input); }} placeholder="Ask Kobe about anyone you know…" style={{ flex: 1, minWidth: 0, height: 40, background: "transparent", border: "none", outline: "none", color: "#F4F1EC", font: "400 15.5px 'Archivo', system-ui, sans-serif" }} />
+            <input ref={composerRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runAgent(input); }} placeholder={composerPlaceholder} style={{ flex: "1 1 0%", minWidth: 0, height: 40, background: "transparent", border: "none", outline: "none", color: "#F4F1EC", font: "400 15.5px 'Archivo', system-ui, sans-serif" }} />
           ) : (
             <div style={{ flex: 1, minWidth: 0, height: 40, display: "flex", alignItems: "center", gap: 12, animation: "kfade .2s ease both" }}>
               <span style={{ font: `600 12px ${mono}`, letterSpacing: ".08em", color: "#E5484D" }}>● 0:{String(recSec).padStart(2, "0")}</span>
@@ -305,10 +345,10 @@ export default function App() {
               <button className="ghost" onClick={() => stopRec(false)} style={{ flex: "none", height: 30, padding: "0 12px", borderRadius: 999, background: "transparent", border: "1px solid rgba(255,255,255,.16)", color: "#D3CBC0", fontSize: 12.5 }}>Cancel</button>
             </div>
           )}
-          <button className="mic" title={rec ? "Stop and send" : "Voice message"} onClick={() => (rec ? stopRec(true) : startRec())} style={{ flex: "none", width: 46, height: 46, padding: 0, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: rec ? "#E5484D" : "rgba(255,255,255,.06)", border: `1px solid ${rec ? "#E5484D" : "rgba(255,255,255,.14)"}`, color: rec ? "#fff" : "#F4F1EC", animation: rec ? "kring 1.2s ease-out infinite" : "none", transition: "background .2s, transform .2s" }}>
+          <button className="mic" title={rec ? "Stop and send" : "Voice message"} onClick={() => (rec ? stopRec(true) : startRec())} style={{ flex: "0 0 46px", width: 46, height: 46, padding: 0, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: rec ? "#E5484D" : "rgba(255,255,255,.06)", border: `1px solid ${rec ? "#E5484D" : "rgba(255,255,255,.14)"}`, color: rec ? "#fff" : "#F4F1EC", animation: rec ? "kring 1.2s ease-out infinite" : "none", transition: "background .2s, transform .2s" }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><line x1="12" y1="18" x2="12" y2="21" /><line x1="8.5" y1="21" x2="15.5" y2="21" /></svg>
           </button>
-          <button className="send-ball" title="Send" onClick={() => runAgent(input)} style={{ flex: "none", position: "relative", width: 46, height: 46, padding: 0, borderRadius: "50%", overflow: "hidden", border: "none", background: "transparent" }}>
+          <button className="send-ball" title="Send" onClick={() => runAgent(input)} style={{ flex: "0 0 46px", position: "relative", width: 46, height: 46, padding: 0, borderRadius: "50%", overflow: "hidden", border: "none", background: "transparent" }}>
             <Ball size={46} shadow="0 6px 18px rgba(224,113,42,.45)" />
           </button>
         </div>

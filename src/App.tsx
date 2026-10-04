@@ -4,12 +4,13 @@ import { isDraftChannel, SEED_ROSTER } from "@/lib/data";
 import { game } from "@/lib/game";
 import { CHIPS, D, INITIAL_SOURCES, PAIR_CODE, VOICE_LINES, type AlertAction, type FeedItem } from "./data";
 import { reply, type AgentReply } from "./agent";
+import { deliverDraft, isLiveConnector } from "../lib/connectors";
 import { Court } from "./Court";
 import { ServiceLogo } from "../components/service-logo";
 import { PersonReport } from "./PersonReport";
 import { CRM_STORAGE_KEY, blankPerson, browserStorage, cardMeta, cardRight, cloneSeed, findPerson, fromForm, initials, peopleFromStoredJson, readPeople, readPeopleForUpdate, toForm, writePeople, type Person, type PersonForm } from "./crm";
 
-type Message = AgentReply & { id: number; role: "agent" | "user"; sent?: boolean };
+type Message = AgentReply & { id: number; role: "agent" | "user"; sent?: boolean; notice?: string };
 type LiveAlert = FeedItem & { id: number; visible: boolean };
 
 const mono = "'JetBrains Mono', monospace";
@@ -228,18 +229,25 @@ export default function App({ persisted = false }: { persisted?: boolean }) {
     }
   };
 
-  const sendDraft = (mid: number) => {
+  const sendDraft = async (mid: number) => {
     const m = messages.find((x) => x.id === mid);
-    setMessages((s) => s.map((x) => (x.id === mid ? { ...x, sent: true } : x)));
-    if (!m?.draft || !isDraftChannel(m.draft.channel)) return;
-    const person = peopleRef.current.find((entry) => entry.name === m.draft!.to);
-    game.logDraft(String(mid), { personId: person?.id, to: m.draft.to, channel: m.draft.channel, body: m.draft.body, copied: false });
+    if (!m?.draft || m.sent) return;
+    const result = await deliverDraft(m.draft.channel, { to: m.draft.to, body: m.draft.body });
+    if (!result.ok) {
+      setMessages((s) => s.map((x) => (x.id === mid ? { ...x, notice: result.reason } : x)));
+      return;
+    }
+    if (isDraftChannel(m.draft.channel)) {
+      const person = peopleRef.current.find((entry) => entry.name === m.draft!.to);
+      game.logDraft(String(mid), { personId: person?.id, to: m.draft.to, channel: m.draft.channel, body: m.draft.body, copied: false });
+    }
+    setMessages((s) => s.map((x) => (x.id === mid ? { ...x, sent: true, notice: undefined } : x)));
   };
 
   const toggleSource = (id: string, name: string) => {
     const on = !sources[id];
     setSources((s) => ({ ...s, [id]: on }));
-    if (on) sync(`${name} connected`, "Backfilling the last 12 months. New context will show up on records.", name.toUpperCase());
+    if (on) sync(`${name} is not connected`, "The switch stays on this device. Chat answers from stored records.", name.toUpperCase());
   };
 
   const pair = () => {
@@ -250,7 +258,7 @@ export default function App({ persisted = false }: { persisted?: boolean }) {
     later(() => {
       setPairBusy(false);
       setChannels((s) => ({ ...s, [id]: true }));
-      sync(`Kobe joined ${ch.name}`, "Message Kobe there anytime. Alerts will follow you.", ch.name.toUpperCase());
+      sync(`${ch.name} is not connected`, "Pairing on this page does not connect an account.", ch.name.toUpperCase());
     }, 1500);
   };
 
@@ -327,7 +335,6 @@ export default function App({ persisted = false }: { persisted?: boolean }) {
   };
 
   const wide = vw >= 1000;
-  const connectedCount = Object.values(sources).filter(Boolean).length;
   const channelCount = Object.values(channels).filter(Boolean).length;
   const visibleCount = alerts.filter((a) => a.visible).length;
   const ordered = [...alerts].reverse();
@@ -362,7 +369,7 @@ export default function App({ persisted = false }: { persisted?: boolean }) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "none", padding: "6px 12px", borderRadius: 999, background: "rgba(16,12,20,.5)", border: "1px solid rgba(255,255,255,.08)", backdropFilter: "blur(14px)", font: `500 11px ${mono}`, letterSpacing: ".06em", color: "#D9D2C7", whiteSpace: "nowrap" }}>
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3DBE8B", boxShadow: "0 0 10px #3DBE8B", animation: "kpulse 1.8s ease-in-out infinite" }} />
-          <span>SCOUTING {connectedCount} SOURCES</span>
+          <span>{["gmail", "slack"].some((id) => isLiveConnector(id)) ? "LIVE" : "NOT CONNECTED"}</span>
         </div>
         {vw >= 1024 && <SeasonHud />}
         <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 8, maxWidth: "100%", minWidth: "min-content", flex: "0 1 auto" }}>
@@ -372,7 +379,6 @@ export default function App({ persisted = false }: { persisted?: boolean }) {
           </button>
           <button className="hover-int" onClick={() => setModal("sources")} style={{ display: "flex", alignItems: "center", gap: 8, flex: "none", height: 38, padding: "0 14px", borderRadius: 999, background: "rgba(16,12,20,.6)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,.1)", color: "#F4F1EC", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
             <span>Integrations</span>
-            <span style={{ font: `600 11px ${mono}`, padding: "2px 6px", borderRadius: 6, background: "rgba(242,182,58,.18)", color: "#F2B63A" }}>{connectedCount}</span>
           </button>
           <button className="hover-cream" onClick={() => setModal("channels")} style={{ display: "flex", alignItems: "center", gap: 8, flex: "none", height: 38, padding: "0 16px", borderRadius: 999, background: "#F4F1EC", border: "none", color: "#15110D", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>
             <span>Add Kobe to…</span>
@@ -454,6 +460,7 @@ export default function App({ persisted = false }: { persisted?: boolean }) {
                           <span>DRAFT</span><span>→ {m.draft.to}</span><span style={{ marginLeft: "auto", color: "#F2B63A" }}>{m.draft.channel}</span>
                         </div>
                         <div style={{ fontSize: 15, lineHeight: 1.5, color: "#F4F1EC" }}>{m.draft.body}</div>
+                        {m.notice && !m.sent ? <div style={{ fontSize: 12.5, color: "#BDB5AA" }}>{m.notice}</div> : null}
                         {!m.sent ? (
                           <div style={{ display: "flex", gap: 8 }}>
                             <button className="gold" onClick={() => sendDraft(m.id)} style={{ height: 32, padding: "0 14px", borderRadius: 999, background: "#F2B63A", border: "none", color: "#15110D", fontSize: 12.5, fontWeight: 700 }}>Send via {m.draft.channel}</button>
@@ -569,7 +576,7 @@ export default function App({ persisted = false }: { persisted?: boolean }) {
               <div style={{ overflowY: "auto", padding: "20px 22px 24px", display: "flex", flexDirection: "column", gap: 22 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   <div style={{ fontWeight: 800, fontStretch: "68%", fontSize: 36, lineHeight: 1, textTransform: "uppercase" }}>Scouting sources</div>
-                  <div style={{ fontSize: 14, color: "#BDB5AA" }}>{connectedCount} connected. Kobe reads to build context and never posts on your behalf.</div>
+                  <div style={{ fontSize: 14, color: "#BDB5AA" }}>No account is connected. A switch stays on this device. Chat answers from the records stored here.</div>
                 </div>
                 {D.groups.map((g) => (
                   <div key={g.name} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -599,18 +606,17 @@ export default function App({ persisted = false }: { persisted?: boolean }) {
               <div style={{ overflowY: "auto", padding: "20px 22px 24px", display: "flex", flexDirection: "column", gap: 18 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   <div style={{ fontWeight: 800, fontStretch: "68%", fontSize: 36, lineHeight: 1, textTransform: "uppercase" }}>Put Kobe in your rotation</div>
-                  <div style={{ fontSize: 14, color: "#BDB5AA" }}>Talk to Kobe wherever you already message. Alerts follow you there.</div>
+                  <div style={{ fontSize: 14, color: "#BDB5AA" }}>{isLiveConnector("slack") ? "Slack is a live connector. The other channels are not connected." : "No channel is connected."}</div>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, alignItems: "start" }}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     {D.channels.map((c) => {
                       const sel = c.id === pairing;
-                      const on = !!channels[c.id];
                       return (
                         <button key={c.id} className="ch" onClick={() => { setPairing(c.id); setPairBusy(false); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 12px", borderRadius: 14, background: sel ? "rgba(255,255,255,.08)" : "rgba(255,255,255,.025)", border: `1px solid ${sel ? "rgba(242,182,58,.5)" : "rgba(255,255,255,.07)"}`, color: "#F4F1EC", textAlign: "left" }}>
                           <div style={{ flex: "none", width: 34, height: 34, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,.08)" }}><ServiceLogo id={c.id} size={20} /></div>
                           <span style={{ flex: 1, fontSize: 14, fontWeight: 600 }}>{c.name}</span>
-                          <span style={{ font: `500 10px ${mono}`, letterSpacing: ".1em", color: on ? "#3DBE8B" : "#A39A8E" }}>{on ? "LIVE" : "ADD"}</span>
+                          <span style={{ font: `500 10px ${mono}`, letterSpacing: ".1em", color: isLiveConnector(c.id) ? "#3DBE8B" : "#A39A8E" }}>{isLiveConnector(c.id) ? "LIVE" : "NOT CONNECTED"}</span>
                         </button>
                       );
                     })}
@@ -647,7 +653,7 @@ export default function App({ persisted = false }: { persisted?: boolean }) {
                     )}
                     {added && (
                       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        <div style={{ flex: 1, height: 42, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 999, background: "rgba(61,190,139,.14)", font: `600 12px ${mono}`, letterSpacing: ".1em", color: "#3DBE8B" }}>✓ KOBE IS LIVE HERE</div>
+                        <div style={{ flex: 1, height: 42, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 999, background: "rgba(255,255,255,.06)", font: `600 12px ${mono}`, letterSpacing: ".1em", color: "#BDB5AA" }}>NOT CONNECTED</div>
                         <button className="ghost" onClick={() => setChannels((st) => ({ ...st, [pc.id]: false }))} style={{ height: 42, padding: "0 16px", borderRadius: 999, background: "transparent", border: "1px solid rgba(255,255,255,.16)", color: "#F4F1EC", fontSize: 13 }}>Remove</button>
                       </div>
                     )}

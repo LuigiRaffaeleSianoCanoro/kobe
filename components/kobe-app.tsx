@@ -18,10 +18,10 @@ import {
 import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
 import { Mic, Square, Volume2, VolumeX } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { createContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
 import { coachingPayload } from "@/lib/coaching-memory";
-import { type ConnectorFlags } from "@/lib/connectors";
+import { isLiveConnector, type ConnectorFlags } from "@/lib/connectors";
 import { CHANNELS, PLAYS, RECORDS, SAMPLE_CALENDAR, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
 import { game, registerAsk, useGame } from "@/lib/game";
 import { weeklyMixtape, type TouchNote } from "@/lib/highlights";
@@ -37,7 +37,7 @@ import { BriefCard, ConflictCard, ConnectorDraftCard, ConnectorSendCard, DraftCa
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any conflicts this week?", "Who haven't I talked to lately?", "Remind me before Maya's birthday", "This week's mixtape"];
 
-// The home page composer posts to /api/chat and sends coaching notes with the thread.
+// The home page composer posts to /api/chat. Without gateway credentials the page answers from stored records.
 // A spoken turn sends only a flag; /api/chat owns the words it adds to the instructions.
 const transport = new AssistantChatTransport({
   api: "/api/chat",
@@ -57,7 +57,6 @@ const adapters = { dictation, speech };
 type Wiring = { roster: Person[]; persisted: boolean; touches?: TouchNote[] };
 
 const ConnectorStatus = createContext<ConnectorFlags>({ gmail: false, slack: false });
-const useConnectorStatus = () => useContext(ConnectorStatus);
 
 function useWire(runtime: AssistantRuntime, { roster, persisted, touches = [] }: Wiring) {
   useEffect(() => {
@@ -74,14 +73,14 @@ function LiveKobe({ connectors, ...wiring }: Wiring & { connectors: ConnectorFla
   return <Court runtime={runtime} persisted={wiring.persisted} connectors={connectors} />;
 }
 
-function ScriptedKobe({ connectors, ...wiring }: Wiring & { connectors: ConnectorFlags }) {
+function RecordsKobe({ connectors, ...wiring }: Wiring & { connectors: ConnectorFlags }) {
   const runtime = useLocalRuntime(kobeAdapter, { adapters });
   useWire(runtime, wiring);
   return <Court runtime={runtime} persisted={wiring.persisted} connectors={connectors} />;
 }
 
 export function KobeApp({ live, connectors, ...wiring }: Wiring & { live: boolean; connectors: ConnectorFlags }) {
-  return live ? <LiveKobe connectors={connectors} {...wiring} /> : <ScriptedKobe connectors={connectors} {...wiring} />;
+  return live ? <LiveKobe connectors={connectors} {...wiring} /> : <RecordsKobe connectors={connectors} {...wiring} />;
 }
 
 function Court({ runtime, persisted, connectors }: { runtime: AssistantRuntime; persisted: boolean; connectors: ConnectorFlags }) {
@@ -794,10 +793,6 @@ function Modal({ open, onClose, children, width, panelClassName = "" }: { open: 
   );
 }
 
-function probedLive(id: string, connected: ConnectorFlags) {
-  return (id === "gmail" && connected.gmail) || (id === "slack" && connected.slack);
-}
-
 function LiveBadge() {
   return <span className="label flex-none rounded-md bg-green/15 px-1.5 py-0.5 text-[10px] text-green">LIVE</span>;
 }
@@ -807,24 +802,25 @@ function NotConnected() {
 }
 
 function HeaderLive() {
-  const connected = useConnectorStatus();
-  if (!connected.gmail && !connected.slack) return null;
+  if (!isLiveConnector("gmail") && !isLiveConnector("slack")) return null;
   return <LiveBadge />;
 }
 
-function connectedNote(connected: ConnectorFlags) {
-  const names = [connected.gmail ? "Gmail" : null, connected.slack ? "Slack" : null].filter((name): name is string => !!name);
+function connectedNote() {
+  const names = [isLiveConnector("gmail") ? "Gmail" : null, isLiveConnector("slack") ? "Slack" : null].filter((name): name is string => !!name);
   if (names.length === 0) return null;
   const verb = names.length > 1 ? "are" : "is";
-  return `${names.join(" and ")} ${verb} connected. Kobe can search and draft there, and sending waits for an explicit confirm.`;
+  return `${names.join(" and ")} ${verb} connected. Sending waits for an explicit confirm.`;
 }
 
 function Integrations() {
   const modal = useGame((s) => s.modal);
-  const connected = useConnectorStatus();
   const close = () => game.openModal(null);
   const open = modal === "sources" || modal === "channels";
   const tab = modal === "channels" ? "channels" : "sources";
+  useEffect(() => {
+    game.hydrateToggles();
+  }, []);
   return (
     <Modal open={open} onClose={close} width={860}>
       <div className="flex items-center gap-4 px-5.5 pt-5">
@@ -846,7 +842,7 @@ function Integrations() {
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Scouting sources</div>
               <div className="text-sm text-[#BDB5AA]">
-                {connectedNote(connected) ?? "Gmail and Slack are the live connectors. Every other source stays on this device and does not send."}
+                {connectedNote() ?? "No account is connected. Chat answers from the records stored here."}
               </div>
             </div>
             {SOURCE_GROUPS.map((g) => (
@@ -858,9 +854,9 @@ function Integrations() {
                       <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.07] text-[#CFC7BB]"><ServiceLogo id={it.id} size={22} /></span>
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span className="text-sm font-semibold">{it.name}</span>
-                        <span className="truncate text-xs text-[#ACA397]">{probedLive(it.id, connected) ? "Live connector" : "Not connected"}</span>
+                        <span className="truncate text-xs text-[#ACA397]">{isLiveConnector(it.id) ? "Live connector" : "Not connected"}</span>
                       </span>
-                      {probedLive(it.id, connected) ? <LiveBadge /> : <NotConnected />}
+                      {isLiveConnector(it.id) ? <LiveBadge /> : <NotConnected />}
                     </div>
                   ))}
                 </div>
@@ -871,7 +867,9 @@ function Integrations() {
           <>
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Put Kobe in your rotation</div>
-              <div className="text-sm text-[#BDB5AA]">{connectedNote(connected) ?? "Slack can send. Telegram, WhatsApp, and Discord are not connected."}</div>
+              <div className="text-sm text-[#BDB5AA]">
+                {isLiveConnector("slack") ? "Slack is connected. Sending waits for an explicit confirm. Telegram, WhatsApp, and Discord are not connected." : "Slack, Telegram, WhatsApp, and Discord are not connected."}
+              </div>
             </div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2">
               {CHANNELS.map((ch) => (
@@ -879,9 +877,9 @@ function Integrations() {
                   <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.08]"><ServiceLogo id={ch.id} size={22} /></span>
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="text-sm font-semibold">{ch.name}</span>
-                    <span className="truncate text-xs text-[#ACA397]">{probedLive(ch.id, connected) ? "Live connector" : "Not connected"}</span>
+                    <span className="truncate text-xs text-[#ACA397]">{isLiveConnector(ch.id) ? "Live connector" : "Not connected"}</span>
                   </span>
-                  {probedLive(ch.id, connected) ? <LiveBadge /> : <NotConnected />}
+                  {isLiveConnector(ch.id) ? <LiveBadge /> : <NotConnected />}
                 </div>
               ))}
             </div>

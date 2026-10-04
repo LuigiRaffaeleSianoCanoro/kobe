@@ -26,7 +26,7 @@ create table if not exists season (
 );
 alter table season add column if not exists last_active date;
 
--- Every draft you copy and send yourself is logged as an "assist".
+-- A touch is stored only after Gmail or Slack actually sends a draft.
 create table if not exists touches (
   id         bigserial primary key,
   person_id  text references people(id) on delete cascade,

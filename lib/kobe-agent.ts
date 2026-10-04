@@ -1,6 +1,7 @@
 import { Agent } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
+import { VOICE_STYLE } from "./chat-request";
 import { connectorInstructions, connectorMailbox, createConnectorTools, liveConnectors, type LiveConnectors, type Mailbox } from "./connectors";
 import { DRAFT_CHANNELS, type Person } from "./data";
 import { weeklyMixtape } from "./highlights";
@@ -12,7 +13,7 @@ import { coachingBlock, type CoachingItem } from "./tape";
 // agent can later point at a self-hosted OpenAI-compatible server running the same model.
 const MODEL = process.env.KOBE_MODEL ?? "neon/gpt-oss-120b";
 
-function instructions(roster: Person[], coaching: CoachingItem[], flags: { gmail: boolean; slack: boolean }) {
+function instructions(roster: Person[], coaching: CoachingItem[], flags: { gmail: boolean; slack: boolean }, voice: boolean) {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   return `You are Kobe, a personal relationship agent. Mamba mentality applied to the people who matter: show up prepared and never miss the small things.
 
@@ -36,10 +37,10 @@ CALENDAR (sample data already in the app, not a connected account):
 ${JSON.stringify(SAMPLE_CALENDAR)}
 
 COACHING NOTES:
-${coachingBlock(roster, coaching)}`;
+${coachingBlock(roster, coaching)}${voice ? `\n\n${VOICE_STYLE}` : ""}`;
 }
 
-export async function buildKobeAgent(coaching: CoachingItem[] = [], options?: { connectors?: LiveConnectors; mailbox?: Mailbox }) {
+export async function buildKobeAgent(coaching: CoachingItem[] = [], options?: { connectors?: LiveConnectors; mailbox?: Mailbox; voice?: boolean }) {
   const roster = await loadRoster();
   const connectors = options?.connectors ?? (await liveConnectors());
   const mailbox = options?.mailbox ?? connectorMailbox;
@@ -133,6 +134,7 @@ export async function buildKobeAgent(coaching: CoachingItem[] = [], options?: { 
       roster,
       coaching.filter((note) => roster.some((person) => person.id === note.personId)),
       flags,
+      options?.voice ?? false,
     ),
     model: MODEL,
     tools: {

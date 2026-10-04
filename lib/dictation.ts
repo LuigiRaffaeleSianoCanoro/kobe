@@ -47,6 +47,10 @@ function recognitionClass(): RecognitionClass | undefined {
 type Options = {
   /** BCP 47 tag read at the start of every session, so a language switch applies to the next one. */
   language: () => string;
+  /** Called on every tap that opens the mic, before recognition starts. */
+  onStart?: () => void;
+  /** Called whenever the mic hears words. */
+  onHeard?: () => void;
   onError?: (error: DictationError) => void;
 };
 
@@ -81,6 +85,7 @@ export class KobeDictationAdapter implements DictationAdapter {
   listen(): DictationAdapter.Session {
     const Recognition = recognitionClass();
     if (!Recognition) throw new Error("SpeechRecognition is not supported in this browser.");
+    this.options.onStart?.();
     const lang = this.options.language();
 
     // The language pack downloads once, inside this tap; this session uses the browser service meanwhile.
@@ -154,6 +159,7 @@ export class KobeDictationAdapter implements DictationAdapter {
         }
         const next = text(false);
         if (next || interim) heard.forEach((cb) => cb({ transcript: next.trim(), isFinal: false }));
+        if ((done + next).trim()) this.options.onHeard?.();
         interim = next;
       });
       r.addEventListener("error", (event) => {

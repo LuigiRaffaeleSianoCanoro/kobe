@@ -1,6 +1,7 @@
 import { toAISdkStream } from "@mastra/ai-sdk";
 import { RequestContext } from "@mastra/core/request-context";
 import { createUIMessageStream, createUIMessageStreamResponse, safeValidateUIMessages } from "ai";
+import { parseChatRequest } from "@/lib/chat-request";
 import { readCoaching } from "@/lib/coaching-db";
 import { USER_TEXT } from "@/lib/connectors";
 import { buildKobeAgent } from "@/lib/kobe-agent";
@@ -13,15 +14,6 @@ export const maxDuration = 60;
 const MAX_BODY_CHARS = 100_000;
 const MAX_MESSAGES = 30;
 
-function parse(raw: string): { messages: unknown; coaching: unknown } {
-  try {
-    const body = JSON.parse(raw) as { messages?: unknown; coaching?: unknown };
-    return { messages: body.messages, coaching: body.coaching };
-  } catch {
-    return { messages: undefined, coaching: undefined };
-  }
-}
-
 const MODEL_ERROR = "Kobe couldn't reach the model. Check the Neon AI Gateway credentials.";
 
 export async function POST(req: Request) {
@@ -30,7 +22,7 @@ export async function POST(req: Request) {
   }
   const raw = await req.text();
   if (raw.length > MAX_BODY_CHARS) return new Response("This conversation is too long. Reload to start a new one.", { status: 413 });
-  const body = parse(raw);
+  const body = parseChatRequest(raw);
   const parsed = await safeValidateUIMessages({ messages: body.messages });
   if (!parsed.success) return new Response("Invalid messages.", { status: 400 });
   // Instructions come from the server only. Coaching is a separate field, checked against the roster.
@@ -42,7 +34,7 @@ export async function POST(req: Request) {
   const requestContext = new RequestContext();
   requestContext.setRaw(USER_TEXT, lastUserText(messages));
 
-  const agent = await buildKobeAgent(mergeCoaching(new Set(roster.map((person) => person.id)), saved, fromClient));
+  const agent = await buildKobeAgent(mergeCoaching(new Set(roster.map((person) => person.id)), saved, fromClient), { voice: body.voice });
   const stream = await agent.stream(messages, { maxSteps: 3, requestContext });
 
   const ui = createUIMessageStream({

@@ -134,6 +134,21 @@ describe("a session", () => {
     expect(errors).toEqual([]);
   });
 
+  it("calls onStart on every tap, before recognition starts", () => {
+    const onStart = vi.fn(() => expect(FakeRecognition.instances).toHaveLength(0));
+    new KobeDictationAdapter({ language: () => "es-AR", onStart }).listen();
+    expect(onStart).toHaveBeenCalledOnce();
+  });
+
+  it("calls onHeard only once words arrive", () => {
+    const onHeard = vi.fn();
+    new KobeDictationAdapter({ language: () => "es-AR", onHeard }).listen();
+    last().say(["", false]);
+    expect(onHeard).not.toHaveBeenCalled();
+    last().say(["hola", false]);
+    expect(onHeard).toHaveBeenCalledOnce();
+  });
+
   it("unsubscribes listeners", () => {
     const session = setup().adapter.listen();
     const heard = vi.fn();

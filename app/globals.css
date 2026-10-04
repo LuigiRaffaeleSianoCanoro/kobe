@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 :root {
+  --header-h: 68px;
   --ink: #120d0a;
   --chalk: #f4f1ec;
   --chalk-2: #d3cbc0;

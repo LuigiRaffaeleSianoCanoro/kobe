@@ -11,7 +11,7 @@ import {
 import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
 import { Dithering } from "@paper-design/shaders-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
 import { CHANNELS, ENGINE, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
 import { game, registerAsk, useGame } from "@/lib/game";
@@ -53,7 +53,7 @@ export function KobeApp({ live, model, ...wiring }: Wiring & { live: boolean; mo
 function Court({ runtime, engine }: { runtime: AssistantRuntime; engine: string }) {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <span className="label pointer-events-none fixed top-[64px] right-5 left-5 z-20 truncate text-[9.5px] text-chalk-3">{engine}</span>
+      <span className="label pointer-events-none fixed top-[calc(var(--header-h)-4px)] right-5 left-5 z-20 truncate text-[9.5px] text-chalk-3">{engine}</span>
       <CourtShader />
       <div className="grain" aria-hidden />
       <Header />
@@ -88,9 +88,18 @@ function Ball({ size = 26, line = 1.5 }: { size?: number; line?: number }) {
 }
 
 function Header() {
+  const ref = useRef<HTMLElement>(null);
+  // The header wraps to a second row when its items overflow; everything pinned below it reads --header-h.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => document.documentElement.style.setProperty("--header-h", `${el.offsetHeight}px`));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   return (
-    <header className="fixed inset-x-0 top-0 z-20 flex h-[68px] items-center gap-4 px-5">
-      <div className="flex items-center gap-2.5">
+    <header ref={ref} className="fixed inset-x-0 top-0 z-20 flex min-h-[68px] flex-wrap content-center items-center gap-x-3 gap-y-2 px-4 py-2 min-[1000px]:gap-x-4 min-[1000px]:px-5">
+      <div className="flex flex-none items-center gap-2.5">
         <Ball />
         <span className="display text-[26px] leading-none">
           KOBE<span className="text-gold">.AI</span>
@@ -101,12 +110,12 @@ function Header() {
         DEMO · SAMPLE DATA
       </div>
       <SeasonHud />
-      <div className="ml-auto flex gap-2">
-        <button onClick={() => game.openModal("sources")} className="glass press flex h-[38px] items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold">
+      <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
+        <button onClick={() => game.openModal("sources")} className="glass press flex h-[38px] flex-none items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold whitespace-nowrap">
           Integrations
           <span className="label rounded-md bg-gold/20 px-1.5 py-0.5 text-gold">SOON</span>
         </button>
-        <button onClick={() => game.openModal("channels")} className="press hidden h-[38px] items-center gap-2 rounded-full bg-chalk px-4 text-[13px] font-bold text-ink sm:flex">
+        <button onClick={() => game.openModal("channels")} className="press flex h-[38px] flex-none items-center gap-2 rounded-full bg-chalk px-4 text-[13px] font-bold whitespace-nowrap text-ink">
           Add Kobe to…
         </button>
       </div>
@@ -190,7 +199,7 @@ function Counter({ value }: { value: number }) {
 function Thread() {
   return (
     <ThreadPrimitive.Root className="contents">
-      <ThreadPrimitive.Viewport className="chat-mask fixed top-[68px] right-0 bottom-[104px] left-0 z-[5] overflow-y-auto min-[1000px]:right-[380px]">
+      <ThreadPrimitive.Viewport className="chat-mask fixed top-(--header-h) right-0 bottom-[104px] left-0 z-[5] overflow-y-auto min-[1000px]:right-[380px]">
         <div className="mx-auto flex max-w-[720px] flex-col gap-3.5 px-5 pt-[96px] pb-8 min-[1000px]:pt-[6vh]">
           <Hero />
           <motion.div {...enter} className="flex max-w-[92%] items-start gap-2.5">
@@ -324,14 +333,49 @@ function AssistantMessage() {
 
 /* ───────────────────────── Composer ───────────────────────── */
 
+const PLACEHOLDER = "Ask Kobe about anyone you know";
+
+let measure: CanvasRenderingContext2D | null = null;
+
+// A textarea wraps a placeholder that doesn't fit, and the autosizing input then grows to two
+// lines. Keep the whole words that fit on one line instead.
+function placeholderThatFits(el: HTMLTextAreaElement) {
+  const style = getComputedStyle(el);
+  const budget = el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - 1;
+  measure ??= document.createElement("canvas").getContext("2d");
+  if (!measure) return `${PLACEHOLDER}…`;
+  measure.font = style.font;
+  let kept = "";
+  for (const word of PLACEHOLDER.split(" ")) {
+    const next = kept ? `${kept} ${word}` : word;
+    if (measure.measureText(`${next}…`).width > budget) break;
+    kept = next;
+  }
+  return `${kept}…`;
+}
+
 function Composer() {
+  const input = useRef<HTMLTextAreaElement>(null);
+  const [placeholder, setPlaceholder] = useState(`${PLACEHOLDER}…`);
+  useLayoutEffect(() => {
+    const el = input.current;
+    if (!el) return;
+    const fit = () => setPlaceholder(placeholderThatFits(el));
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    document.fonts?.ready.then(fit);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div className="fixed right-0 bottom-[22px] left-0 z-10 px-4 min-[1000px]:right-[380px]">
       <ComposerPrimitive.Root className="glass mx-auto flex max-w-[720px] items-center gap-2.5 rounded-full py-2 pr-2 pl-5 shadow-[0_24px_60px_rgba(0,0,0,.5)]">
         <ComposerPrimitive.Input
+          ref={input}
           rows={1}
           autoFocus
-          placeholder="Ask Kobe about anyone you know…"
+          placeholder={placeholder}
+          aria-label={PLACEHOLDER}
           className="h-10 min-w-0 flex-1 resize-none bg-transparent py-2.5 text-[15.5px] text-chalk outline-none placeholder:text-chalk-3"
         />
         <ComposerPrimitive.Send asChild>
@@ -352,7 +396,7 @@ function Lane() {
   const alerts = useGame((s) => s.alerts);
   const visible = [...alerts].reverse().filter((a) => a.visible);
   return (
-    <aside className="pointer-events-none fixed top-[84px] right-4 left-4 z-30 flex flex-col gap-2.5 min-[1000px]:top-[76px] min-[1000px]:right-5 min-[1000px]:bottom-[104px] min-[1000px]:left-auto min-[1000px]:w-[340px] min-[1000px]:overflow-y-auto min-[1000px]:pb-5">
+    <aside className="pointer-events-none fixed top-[calc(var(--header-h)+16px)] right-4 left-4 z-30 flex flex-col gap-2.5 min-[1000px]:top-[calc(var(--header-h)+8px)] min-[1000px]:right-5 min-[1000px]:bottom-[104px] min-[1000px]:left-auto min-[1000px]:w-[340px] min-[1000px]:overflow-y-auto min-[1000px]:pb-5">
       <GamePlan />
       {visible.length > 1 && (
         <button onClick={game.clearAlerts} className="glass label press pointer-events-auto hidden h-[26px] self-end rounded-full px-2.5 text-chalk-2 min-[1000px]:block">

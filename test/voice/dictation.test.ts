@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { KobeDictationAdapter, type DictationError } from "./dictation";
+import { KobeDictationAdapter, type DictationError } from "../../lib/dictation";
 
 type Result = { isFinal: boolean; 0: { transcript: string } };
 

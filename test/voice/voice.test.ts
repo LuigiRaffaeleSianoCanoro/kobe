@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tagFor } from "./voice";
+import { tagFor } from "../../lib/voice";
 
 describe("tagFor", () => {
   it("keeps the browser's regional tag", () => {

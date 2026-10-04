@@ -6,6 +6,7 @@ import {
   ErrorPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
+  useAuiState,
   useLocalRuntime,
   type AssistantRuntime,
   type EmptyMessagePartProps,
@@ -294,15 +295,33 @@ function AgentText({ text }: { text: string }) {
   );
 }
 
+// The chat library keeps the error only on the newest message, so an older failed turn has to remember its own text.
+const failedTurns = new Map<string, string>();
+
+function failedTurnCopy(status: EmptyMessagePartProps["status"]) {
+  if (status.type !== "incomplete" || status.reason !== "error") return;
+  const error = status.error;
+  if (typeof error === "string" && error) return error;
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string" && error.message) return error.message;
+}
+
 function Thinking({ status }: EmptyMessagePartProps) {
-  if (status.type !== "running") return null;
-  return (
-    <div className="glass flex gap-1.5 self-start rounded-[4px_18px_18px_18px] px-4 py-3.5">
-      {[0, 0.15, 0.3].map((d) => (
-        <span key={d} className="h-1.5 w-1.5 rounded-full bg-gold" style={{ animation: `kdot 1s ${d}s infinite` }} />
-      ))}
-    </div>
-  );
+  const id = useAuiState((s) => s.message.id);
+  const copy = failedTurnCopy(status);
+  if (id && copy) failedTurns.set(id, copy);
+  if (status.type === "running") {
+    if (id) failedTurns.delete(id);
+    return (
+      <div className="glass flex gap-1.5 self-start rounded-[4px_18px_18px_18px] px-4 py-3.5">
+        {[0, 0.15, 0.3].map((d) => (
+          <span key={d} className="h-1.5 w-1.5 rounded-full bg-gold" style={{ animation: `kdot 1s ${d}s infinite` }} />
+        ))}
+      </div>
+    );
+  }
+  // The live error is already rendered by MessagePrimitive.Error.
+  if (copy) return null;
+  return <AgentText text={(id && failedTurns.get(id)) || "Kobe couldn't answer that one."} />;
 }
 
 function AssistantMessage() {

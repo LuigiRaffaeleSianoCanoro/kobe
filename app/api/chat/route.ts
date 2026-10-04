@@ -20,12 +20,12 @@ const MODEL_ERROR = "Kobe couldn't reach the model. Check the Neon AI Gateway cr
 
 export async function POST(req: Request) {
   if (!req.headers.get("content-type")?.startsWith("application/json")) {
-    return Response.json({ error: "Expected application/json." }, { status: 415 });
+    return new Response("Expected application/json.", { status: 415 });
   }
   const raw = await req.text();
-  if (raw.length > MAX_BODY_CHARS) return Response.json({ error: "This conversation is too long. Reload to start a new one." }, { status: 413 });
+  if (raw.length > MAX_BODY_CHARS) return new Response("This conversation is too long. Reload to start a new one.", { status: 413 });
   const parsed = await safeValidateUIMessages({ messages: parse(raw) });
-  if (!parsed.success) return Response.json({ error: "Invalid messages." }, { status: 400 });
+  if (!parsed.success) return new Response("Invalid messages.", { status: 400 });
   // Instructions come from the server only.
   const messages = parsed.data.filter((m) => m.role !== "system").slice(-MAX_MESSAGES);
 

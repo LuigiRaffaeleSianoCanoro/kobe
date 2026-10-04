@@ -1,0 +1,12 @@
+{
+  "name": "kobe-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "preview": "node record.mjs --preview",
+    "build": "bash build.sh"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.63.0"
+  }
+}

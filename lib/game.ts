@@ -4,11 +4,11 @@ import { useSyncExternalStore } from "react";
 import { publishCoaching } from "./coaching-memory";
 import { DEFAULT_TOGGLES, isLiveConnector, readToggleStorage, sanitizeToggles, writeToggleStorage } from "./connectors";
 import { ASSIST_XP, FEED, PLAYS, SEED_ROSTER, type DraftChannel, type FeedItem, type Person, type PlayId } from "./data";
-import type { TouchNote } from "./highlights";
+import { undoFailedDraft, type TouchNote } from "./highlights";
 import { PlanWrite, insertPlanRecord, planIdReuse, plansFromStoredJson, recordSupports, samePlan, withoutPlan, type Plan } from "./plans";
 import type { Season, SeasonEvent } from "./season";
 import { NOTE_MAX, TAPE_STORAGE_KEY, cleanNote, parseStoredCoaching } from "./tape";
-import { dropFailedTouch, newestTouches, recordSavedBody, rememberTouch } from "./touch-log";
+import { newestTouches, recordSavedBody, rememberTouch } from "./touch-log";
 
 export type PlanStorage = "browser" | "postgres" | "session";
 const PLAN_KEY = "kobe.plans.v1";
@@ -510,6 +510,7 @@ export const game = {
       return;
     }
     const startsDay = !state.activeToday;
+    const written = before ? { ...before, rapport: Math.min(99, before.rapport + 3), last: `${channel} · just now` } : undefined;
     set((current) => {
       const touches = rememberTouch(current.touches, touch);
       writeStoredTouches(touches);
@@ -518,7 +519,7 @@ export const game = {
         logged: { ...current.logged, [key]: true },
         assists: current.assists + 1,
         ...markActive(current),
-        people: before ? { ...current.people, [before.id]: { ...before, rapport: Math.min(99, before.rapport + 3), last: `${channel} · just now` } } : current.people,
+        people: written ? { ...current.people, [written.id]: written } : current.people,
         touches,
       };
     });
@@ -531,15 +532,16 @@ export const game = {
         { type: "assist", personId, channel, body },
         () => {
           set((current) => {
-            const touches = dropFailedTouch(current.touches, touch);
-            writeStoredTouches(touches);
+            // Drop only this note. A snapshot of the whole list would also erase drafts logged after this one.
+            const undone = undoFailedDraft(current, { touch, personId: written?.id, written, before });
+            writeStoredTouches(undone.touches);
             return {
               sent: { ...current.sent, [key]: false },
               logged: { ...current.logged, [key]: false },
               xp: current.xp - ASSIST_XP,
               assists: current.assists - 1,
-              people: before ? { ...current.people, [before.id]: before } : current.people,
-              touches,
+              people: undone.people,
+              touches: undone.touches,
               ...(startsDay ? { streak: current.streak - 1, activeToday: false } : {}),
             };
           });

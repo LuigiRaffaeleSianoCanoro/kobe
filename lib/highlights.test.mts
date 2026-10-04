@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { scriptedReply } from "./agent.ts";
 import { SAMPLE_CALENDAR, SEED_ROSTER, type Person } from "./data.ts";
-import { mixtapeText, weeklyMixtape, type TouchNote } from "./highlights.ts";
+import { capRecentTouches, mixtapeText, undoFailedDraft, weeklyMixtape, type TouchNote } from "./highlights.ts";
 
 const OCT_4 = new Date(2026, 9, 4, 12);
 
@@ -153,7 +154,65 @@ test("asking for the mixtape does not steal birthdays, conflicts, or briefs", ()
   assert.equal(scriptedReply("Who has a birthday this week?").tool?.toolName, "show_people");
   assert.equal(scriptedReply("Any conflicts this week?").tool?.toolName, "resolve_conflict");
   assert.equal(scriptedReply("Brief me on Marcus").tool?.toolName, "pregame_brief");
+  assert.equal(scriptedReply("Brief me on what happened with Marcus").tool?.toolName, "pregame_brief");
+  assert.equal(scriptedReply("What happened with Dev?").tool?.toolName, "draft_message");
+  assert.equal(scriptedReply("What happened with Dev?").tool?.args.recordId, "dev");
   assert.equal(scriptedReply("Who haven't I talked to lately?").tool?.toolName, "show_people");
   assert.equal(scriptedReply("Draft a birthday message for Maya").tool?.toolName, "draft_message");
   assert.doesNotMatch(scriptedReply("This week's mixtape").text, /posted|run club|connected account/i);
+});
+
+test("a capped touch window keeps the newest notes, oldest first", () => {
+  const start = Date.parse("2026-09-20T00:00:00Z");
+  const notes: TouchNote[] = Array.from({ length: 101 }, (_, index) => ({
+    personId: "maya",
+    channel: "WhatsApp",
+    body: `note ${index}`,
+    at: new Date(start + index * 60 * 60 * 1000).toISOString(),
+  }));
+  const kept = capRecentTouches(notes);
+  assert.equal(kept.length, 100);
+  assert.equal(kept[0]?.body, "note 1");
+  assert.equal(kept.at(-1)?.body, "note 100");
+  assert.equal(kept.some((note) => note.body === "note 0"), false);
+
+  const source = readFileSync(new URL("./roster.ts", import.meta.url), "utf8");
+  const capped = source.slice(source.indexOf("from touches"), source.indexOf(") recent"));
+  assert.match(capped, /order by created_at desc/);
+  assert.match(capped, /limit 100/);
+  assert.equal(/order by created_at asc/.test(capped), false);
+});
+
+test("a failed save drops only the note that failed", () => {
+  const marcus = person({ id: "marcus", name: "Marcus Reid" });
+  const priya = person({ id: "priya", name: "Priya Nair" });
+  const failed = { personId: "marcus", channel: "WhatsApp", body: "See you at Blue Bottle.", at: "2026-10-04T15:00:00.000Z" };
+  const kept = { personId: "priya", channel: "LinkedIn", body: "Coffee soon, for real.", at: "2026-10-04T15:01:00.000Z" };
+  const marcusWritten = { ...marcus, rapport: 53, last: "WhatsApp · just now" };
+  const priyaWritten = { ...priya, rapport: 53, last: "LinkedIn · just now" };
+  const undone = undoFailedDraft(
+    { touches: [failed, kept], people: { marcus: marcusWritten, priya: priyaWritten } },
+    { touch: failed, personId: "marcus", written: marcusWritten, before: marcus },
+  );
+  assert.deepEqual(undone.touches.map((note) => note.body), ["Coffee soon, for real."]);
+  assert.equal(undone.people.marcus, marcus);
+  assert.equal(undone.people.priya, priyaWritten);
+
+  const first = { personId: "marcus", channel: "WhatsApp", body: "First", at: "2026-10-04T15:00:00.000Z" };
+  const second = { personId: "marcus", channel: "WhatsApp", body: "Second", at: "2026-10-04T15:05:00.000Z" };
+  const afterFirst = { ...marcus, rapport: 53, last: "WhatsApp · just now" };
+  const afterSecond = { ...afterFirst, rapport: 56, last: "WhatsApp · just now" };
+  const samePerson = undoFailedDraft(
+    { touches: [first, second], people: { marcus: afterSecond } },
+    { touch: first, personId: "marcus", written: afterFirst, before: marcus },
+  );
+  assert.deepEqual(samePerson.touches.map((note) => note.body), ["Second"]);
+  assert.equal(samePerson.people.marcus, afterSecond);
+
+  const source = readFileSync(new URL("./game.ts", import.meta.url), "utf8");
+  const marker = source.indexOf("Drop only this note");
+  assert.notEqual(marker, -1);
+  const rollback = source.slice(marker, source.indexOf("NOT SAVED", marker));
+  assert.match(rollback, /undoFailedDraft/);
+  assert.equal(rollback.includes("beforeTouches"), false);
 });

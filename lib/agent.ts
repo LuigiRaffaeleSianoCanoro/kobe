@@ -108,6 +108,7 @@ export function scriptedReply(input: string): Reply {
       text: "These people are cooling off. One touch each keeps them in the rotation.",
       tool: { toolName: "show_people", args: { title: "COOLING OFF", people: [person("dev", "Unanswered WhatsApp", "9 DAYS"), person("priya", "Last LinkedIn like", "2 MO"), person("maya", "Last Instagram DM", "6 WK")] } },
     };
+  // After the person branches. wantsMixtape also refuses a named person or a brief.
   if (wantsMixtape(t))
     return { text: "Here's this week's mixtape. Every line is already on a stored record.", tool: { toolName: "weekly_highlights", args: {} } };
 

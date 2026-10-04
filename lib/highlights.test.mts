@@ -159,7 +159,7 @@ test("asking for the mixtape does not steal birthdays, conflicts, or briefs", ()
 });
 
 test("a named person or a brief is that person's card, not the mixtape", () => {
-  assert.equal(scriptedReply("What happened with Dev").tool?.toolName, "draft_message");
+  assert.equal(scriptedReply("What happened with Dev").tool?.toolName, "pregame_brief");
   assert.equal(scriptedReply("what happened with Marcus").tool?.toolName, "pregame_brief");
   assert.equal(scriptedReply("Brief me on what happened with Marcus").tool?.toolName, "pregame_brief");
   assert.equal(scriptedReply("What happened at coffee with Marcus?").tool?.toolName, "pregame_brief");

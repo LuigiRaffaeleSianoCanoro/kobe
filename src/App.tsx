@@ -3,13 +3,42 @@ import { CHIPS, D, INITIAL_SOURCES, PAIR_CODE, VOICE_LINES, type AlertAction, ty
 import { reply, type AgentReply } from "./agent";
 import { Court } from "./Court";
 import { PersonReport } from "./PersonReport";
-import { blankPerson, browserStorage, cardMeta, cardRight, cloneSeed, findPerson, fromForm, initials, readPeople, toForm, writePeople, type Person, type PersonForm } from "./crm";
+import { CRM_STORAGE_KEY, blankPerson, browserStorage, cardMeta, cardRight, cloneSeed, findPerson, fromForm, initials, peopleFromStoredJson, readPeople, readPeopleForUpdate, toForm, writePeople, type Person, type PersonForm } from "./crm";
 
 type Message = AgentReply & { id: number; role: "agent" | "user"; sent?: boolean };
 type LiveAlert = FeedItem & { id: number; visible: boolean };
 
 const mono = "'JetBrains Mono', monospace";
 const glass = "rgba(16,12,20,.66)";
+const COMPOSER_PLACEHOLDER = "Ask Kobe about anyone you know…";
+
+let placeholderMeasure: CanvasRenderingContext2D | null = null;
+
+/** Content-box width, with 1px of slack so a rounded edge cannot clip the placeholder. */
+function composerTextBudget(el: HTMLElement) {
+  const rect = el.getBoundingClientRect();
+  const style = getComputedStyle(el);
+  const padding = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
+  const border = (Number.parseFloat(style.borderLeftWidth) || 0) + (Number.parseFloat(style.borderRightWidth) || 0);
+  return rect.width - padding - border - 1;
+}
+
+function placeholderThatFits(text: string, maxWidth: number, font: string) {
+  if (typeof document === "undefined" || maxWidth <= 0) return text;
+  if (!placeholderMeasure) placeholderMeasure = document.createElement("canvas").getContext("2d");
+  const ctx = placeholderMeasure;
+  if (!ctx) return text;
+  ctx.font = font;
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  const words = text.split(" ");
+  let kept = "";
+  for (const word of words) {
+    const next = kept ? `${kept} ${word}` : word;
+    if (ctx.measureText(`${next}…`).width > maxWidth) break;
+    kept = next;
+  }
+  return kept ? `${kept}…` : "…";
+}
 
 function Ball({ size, shadow }: { size: number; shadow?: string }) {
   const seam = size >= 40 ? 2 : 1.5;
@@ -30,6 +59,7 @@ function Diamond() {
 export default function App() {
   const scrollRef = useRef<HTMLElement>(null);
   const headerRef = useRef<HTMLElement>(null);
+  const composerRef = useRef<HTMLInputElement>(null);
   const timers = useRef<number[]>([]);
   const recInt = useRef<number | null>(null);
   const voiceI = useRef(-1);
@@ -38,6 +68,7 @@ export default function App() {
   const [vw, setVw] = useState(window.innerWidth);
   const [headerHeight, setHeaderHeight] = useState(68);
   const [input, setInput] = useState("");
+  const [composerPlaceholder, setComposerPlaceholder] = useState(COMPOSER_PLACEHOLDER);
   const [typing, setTyping] = useState(false);
   const [modal, setModal] = useState<null | "sources" | "channels" | "roster">(null);
   const [record, setRecord] = useState<string | null>(null);
@@ -85,14 +116,14 @@ export default function App() {
     setAlerts((s) => s.map((x) => (x.id === id ? { ...x, visible: false } : x)));
   };
 
-  const runAgent = (text: string) => {
+  const runAgent = (text: string, personId?: string) => {
     if (!text || !text.trim()) return;
     const id = Date.now();
     setInput("");
     setTyping(true);
     setMessages((s) => [...s, { id, role: "user", text }]);
     later(() => {
-      const r = reply(text, sourcesRef.current, peopleRef.current);
+      const r = reply(text, sourcesRef.current, peopleRef.current, personId);
       setTyping(false);
       setMessages((s) => [...s, { id: id + 1, role: "agent", ...r }]);
     }, 900 + Math.random() * 600);
@@ -128,6 +159,16 @@ export default function App() {
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [messages.length, typing]);
 
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== CRM_STORAGE_KEY || event.newValue == null) return;
+      const next = peopleFromStoredJson(event.newValue);
+      if (next) setPeople(next);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   useLayoutEffect(() => {
     const el = headerRef.current;
     if (!el) return;
@@ -140,6 +181,24 @@ export default function App() {
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+
+  useLayoutEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    const fit = () => {
+      const next = placeholderThatFits(COMPOSER_PLACEHOLDER, composerTextBudget(el), getComputedStyle(el).font);
+      setComposerPlaceholder((prev) => (prev === next ? prev : next));
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    let alive = true;
+    document.fonts?.ready.then(() => { if (alive) fit(); }).catch(() => {});
+    return () => {
+      alive = false;
+      observer.disconnect();
+    };
+  }, [rec, vw]);
 
   const startRec = () => {
     setRec(true);
@@ -183,12 +242,6 @@ export default function App() {
     }, 1500);
   };
 
-  const persistPeople = (next: Person[]): boolean => {
-    if (!writePeople(browserStorage(), next)) return false;
-    setPeople(next);
-    return true;
-  };
-
   const openRecord = (id: string) => {
     setForm(null);
     setRecord(id);
@@ -212,16 +265,39 @@ export default function App() {
 
   const saveForm = () => {
     if (!form) return;
-    const existing = findPerson(people, form.id);
-    const nextPerson = fromForm(form, existing);
-    const next = existing ? people.map((person) => (person.id === nextPerson.id ? nextPerson : person)) : [...people, nextPerson];
-    if (!persistPeople(next)) {
+    const snapshot = form;
+    const remembered = findPerson(peopleRef.current, snapshot.id);
+    const commit = (): boolean => {
+      const storage = browserStorage();
+      const stored = readPeopleForUpdate(storage);
+      if (!stored) return false;
+      const existing = findPerson(stored, snapshot.id) ?? remembered;
+      const nextPerson = fromForm(snapshot, existing);
+      const next = findPerson(stored, nextPerson.id)
+        ? stored.map((person) => (person.id === nextPerson.id ? nextPerson : person))
+        : [...stored, nextPerson];
+      if (!writePeople(storage, next)) return false;
+      setPeople(next);
+      setSaveError(null);
+      setForm(null);
+      setRecord(nextPerson.id);
+      return true;
+    };
+    const fail = () => {
       setSaveError("Couldn't save. Browser storage rejected the write, so this record is unchanged.");
+    };
+    const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+    if (locks) {
+      try {
+        void locks.request(CRM_STORAGE_KEY, () => {
+          if (!commit()) fail();
+        }).catch(() => fail());
+      } catch {
+        fail();
+      }
       return;
     }
-    setSaveError(null);
-    setForm(null);
-    setRecord(nextPerson.id);
+    if (!commit()) fail();
   };
 
   const cancelForm = () => {
@@ -276,7 +352,7 @@ export default function App() {
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3DBE8B", boxShadow: "0 0 10px #3DBE8B", animation: "kpulse 1.8s ease-in-out infinite" }} />
           <span>SCOUTING {connectedCount} SOURCES</span>
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end", maxWidth: "100%" }}>
+        <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 8, maxWidth: "100%", minWidth: "min-content", flex: "0 1 auto" }}>
           <button className="hover-int" aria-label="Roster" onClick={() => setModal("roster")} style={{ display: "flex", alignItems: "center", gap: 8, flex: "none", height: 38, padding: "0 14px", borderRadius: 999, background: "rgba(16,12,20,.6)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,.1)", color: "#F4F1EC", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
             <span>Roster</span>
             <span style={{ font: `600 11px ${mono}`, padding: "2px 6px", borderRadius: 6, background: "rgba(242,182,58,.18)", color: "#F2B63A" }}>{people.length}</span>
@@ -397,7 +473,7 @@ export default function App() {
       <div style={{ position: "fixed", left: 0, right: lane.chatRight, bottom: 22, zIndex: 10, padding: "0 16px" }}>
         <div style={{ maxWidth: 720, margin: "0 auto", display: "flex", alignItems: "center", gap: 10, padding: "8px 8px 8px 20px", borderRadius: 999, background: "rgba(16,12,20,.72)", backdropFilter: "blur(20px) saturate(150%)", border: "1px solid rgba(255,255,255,.12)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
           {!rec ? (
-            <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runAgent(input); }} placeholder="Ask Kobe about anyone you know…" style={{ flex: 1, minWidth: 0, height: 40, background: "transparent", border: "none", outline: "none", color: "#F4F1EC", font: "400 15.5px 'Archivo', system-ui, sans-serif" }} />
+            <input ref={composerRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runAgent(input); }} placeholder={composerPlaceholder} aria-label={COMPOSER_PLACEHOLDER} style={{ flex: "1 1 0%", minWidth: 0, height: 40, padding: 0, background: "transparent", border: "none", outline: "none", color: "#F4F1EC", font: "400 15.5px 'Archivo', system-ui, sans-serif" }} />
           ) : (
             <div style={{ flex: 1, minWidth: 0, height: 40, display: "flex", alignItems: "center", gap: 12, animation: "kfade .2s ease both" }}>
               <span style={{ font: `600 12px ${mono}`, letterSpacing: ".08em", color: "#E5484D" }}>● 0:{String(recSec).padStart(2, "0")}</span>
@@ -409,10 +485,10 @@ export default function App() {
               <button className="ghost" onClick={() => stopRec(false)} style={{ flex: "none", height: 30, padding: "0 12px", borderRadius: 999, background: "transparent", border: "1px solid rgba(255,255,255,.16)", color: "#D3CBC0", fontSize: 12.5 }}>Cancel</button>
             </div>
           )}
-          <button className="mic" title={rec ? "Stop and send" : "Voice message"} onClick={() => (rec ? stopRec(true) : startRec())} style={{ flex: "none", width: 46, height: 46, padding: 0, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: rec ? "#E5484D" : "rgba(255,255,255,.06)", border: `1px solid ${rec ? "#E5484D" : "rgba(255,255,255,.14)"}`, color: rec ? "#fff" : "#F4F1EC", animation: rec ? "kring 1.2s ease-out infinite" : "none", transition: "background .2s, transform .2s" }}>
+          <button className="mic" title={rec ? "Stop and send" : "Voice message"} onClick={() => (rec ? stopRec(true) : startRec())} style={{ flex: "0 0 46px", width: 46, height: 46, padding: 0, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: rec ? "#E5484D" : "rgba(255,255,255,.06)", border: `1px solid ${rec ? "#E5484D" : "rgba(255,255,255,.14)"}`, color: rec ? "#fff" : "#F4F1EC", animation: rec ? "kring 1.2s ease-out infinite" : "none", transition: "background .2s, transform .2s" }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><line x1="12" y1="18" x2="12" y2="21" /><line x1="8.5" y1="21" x2="15.5" y2="21" /></svg>
           </button>
-          <button className="send-ball" title="Send" onClick={() => runAgent(input)} style={{ flex: "none", position: "relative", width: 46, height: 46, padding: 0, borderRadius: "50%", overflow: "hidden", border: "none", background: "transparent" }}>
+          <button className="send-ball" title="Send" onClick={() => runAgent(input)} style={{ flex: "0 0 46px", position: "relative", width: 46, height: 46, padding: 0, borderRadius: "50%", overflow: "hidden", border: "none", background: "transparent" }}>
             <Ball size={46} shadow="0 6px 18px rgba(224,113,42,.45)" />
           </button>
         </div>
@@ -578,7 +654,7 @@ export default function App() {
           onSave={saveForm}
           onCancel={cancelForm}
           onClose={closeReport}
-          onAsk={(prompt) => { closeReport(); runAgent(prompt); }}
+          onAsk={(prompt, personId) => { closeReport(); runAgent(prompt, personId); }}
           saveError={saveError}
         />
       )}

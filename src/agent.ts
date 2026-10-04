@@ -118,9 +118,9 @@ function mentionsName(text: string, name: string): boolean {
   return new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(name)}(?![\\p{L}\\p{N}])`, "iu").test(text);
 }
 
-/** True when the ask names someone after "brief me on" / "pregame on", whether or not they are on the roster. */
+/** True when a brief names someone, whether or not they are on the roster. "on" is not the only preposition. */
 function asksForNamedPerson(text: string): boolean {
-  return /(?:brief(?:\s+me)?|pregame)\s+on\s+\S/iu.test(text);
+  return /(?:brief(?:\s+me)?|pregame)\s+(?:on|about|for)\s+\S/iu.test(text);
 }
 
 function fullNameMatches(people: Person[], text: string): Person[] {
@@ -209,6 +209,10 @@ export function reply(text: string, sources: Record<string, boolean>, people: Pe
     return briefFor(marcus);
   }
   if (/\b(marcus|coffee)\b/.test(t) && !/(draft|message|write|congrats)/.test(t)) {
+    const mention = resolveMention(people, text);
+    if (mention.ambiguous) return whichPerson(mention.ambiguous);
+    if (mention.person) return briefFor(mention.person);
+    if (/\bmarcus\b/.test(t)) return { text: "That person is not on the roster." };
     const marcus = people.find((person) => person.id === "marcus");
     if (!marcus) return { text: "That person is not on the roster." };
     return briefFor(marcus);

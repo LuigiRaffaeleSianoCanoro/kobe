@@ -43,7 +43,8 @@ export type PersonForm = {
 export type CardMetaField = "role" | "lastTouch";
 export type CardRightField = "birthday" | "lastTouch" | "none";
 
-const STORAGE_KEY = "kobe.crm.v1";
+export const CRM_STORAGE_KEY = "kobe.crm.v1";
+const STORAGE_KEY = CRM_STORAGE_KEY;
 
 const SAMPLE_PEOPLE: Person[] = [
   {
@@ -209,6 +210,33 @@ export function readPeople(storage: StorageLike | null): Person[] {
     return parsed.map(normalizePerson).filter((person): person is Person => person !== null).map(withSampleAction);
   } catch {
     return cloneSeed();
+  }
+}
+
+/**
+ * Roster currently in storage, for a read-modify-write.
+ * Null when storage is missing or the saved value cannot be merged.
+ * Does not substitute the seed for a failed read, and does not write.
+ */
+export function readPeopleForUpdate(storage: StorageLike | null): Person[] | null {
+  if (!storage) return null;
+  try {
+    const raw = storage.getItem(STORAGE_KEY);
+    if (raw == null) return cloneSeed();
+    return peopleFromStoredJson(raw);
+  } catch {
+    return null;
+  }
+}
+
+/** Parse a stored roster. Null when the JSON is not a list of records. */
+export function peopleFromStoredJson(raw: string): Person[] | null {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.map(normalizePerson).filter((person): person is Person => person !== null).map(withSampleAction);
+  } catch {
+    return null;
   }
 }
 

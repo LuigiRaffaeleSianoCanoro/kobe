@@ -50,7 +50,7 @@ export function PersonReport({
   onSave: () => void;
   onCancel: () => void;
   onClose: () => void;
-  onAsk: (prompt: string) => void;
+  onAsk: (prompt: string, personId?: string) => void;
   saveError?: string | null;
 }) {
   const editing = form !== null;
@@ -132,7 +132,7 @@ export function PersonReport({
               ) : null}
               <button className={view.action && view.prompt ? "ghost" : "gold"} aria-label="Edit record" onClick={onEdit} style={view.action && view.prompt ? { height: 42, padding: "0 16px", borderRadius: 999, background: "transparent", border: "1px solid rgba(255,255,255,.16)", color: "#F4F1EC", fontSize: 14 } : { flex: "1 1 160px", height: 42, borderRadius: 999, background: "#F2B63A", border: "none", color: "#15110D", fontSize: 14, fontWeight: 700 }}>Edit record</button>
               {view.name.trim() && !/^brief me\b/i.test(view.prompt) ? (
-                <button className="ghost" aria-label="Brief me" onClick={() => onAsk(`Brief me on ${view.name}`)} style={{ height: 42, padding: "0 16px", borderRadius: 999, background: "transparent", border: "1px solid rgba(255,255,255,.16)", color: "#F4F1EC", fontSize: 14 }}>Brief me</button>
+                <button className="ghost" aria-label="Brief me" onClick={() => onAsk(`Brief me on ${view.name}`, view.id)} style={{ height: 42, padding: "0 16px", borderRadius: 999, background: "transparent", border: "1px solid rgba(255,255,255,.16)", color: "#F4F1EC", fontSize: 14 }}>Brief me</button>
               ) : null}
               <button className="ghost" aria-label="Close report" onClick={onClose} style={{ height: 42, padding: "0 18px", borderRadius: 999, background: "transparent", border: "1px solid rgba(255,255,255,.16)", color: "#F4F1EC", fontSize: 14 }}>Close</button>
             </div>

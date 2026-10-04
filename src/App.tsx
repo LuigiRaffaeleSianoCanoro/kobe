@@ -253,7 +253,7 @@ export default function App() {
             <span>Integrations</span>
             <span style={{ font: `600 11px ${mono}`, padding: "2px 6px", borderRadius: 6, background: "rgba(242,182,58,.18)", color: "#F2B63A" }}>{connectedCount}</span>
           </button>
-          <button className="hover-cream" onClick={() => setModal("channels")} style={{ display: "flex", alignItems: "center", gap: 8, height: 38, padding: "0 16px", borderRadius: 999, background: "#F4F1EC", border: "none", color: "#15110D", fontSize: 13, fontWeight: 700 }}>
+          <button className="hover-cream" onClick={() => setModal("channels")} style={{ display: wide ? "flex" : "none", alignItems: "center", gap: 8, height: 38, padding: "0 16px", borderRadius: 999, background: "#F4F1EC", border: "none", color: "#15110D", fontSize: 13, fontWeight: 700 }}>
             <span>Add Kobe to…</span>
             {channelCount > 0 && <span style={{ font: `600 11px ${mono}`, padding: "2px 6px", borderRadius: 6, background: "#15110D", color: "#F2B63A" }}>{channelCount}</span>}
           </button>

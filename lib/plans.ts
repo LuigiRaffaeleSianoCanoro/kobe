@@ -76,9 +76,9 @@ export function mentionsConnectedAccount(text: string): boolean {
   return ACCOUNT.test(text);
 }
 
-// Watching for a reply is an inbox, not a weekly check-in. Birthday, quiet, and next-up asks name a field on the record and do not match this.
+// Waiting on an incoming message is an inbox, not a weekly check-in. Birthday, quiet, and next-up asks name a field on the record and do not match this.
 const INCOMING_REPLY =
-  /\b(?:when|if|once)\b[\s\S]{0,80}?\b(?:replies|reply|responds|respond|answers|answer|writes?\s+back|gets?\s+back)\b/iu;
+  /\b(?:when|if|once|after|whenever|as soon as)\b[\s\S]{0,80}?\b(?:replies|reply|responds|respond|answers|answer|writes?\s+back|gets?\s+back|hears?\s+from|sends?|texts?|dms?|messages?|posts?|emails?|calls?)\b/iu;
 
 export function watchesIncomingReply(text: string): boolean {
   return INCOMING_REPLY.test(text);
@@ -281,6 +281,7 @@ export type PlanIntent =
 
 export function isPlanAsk(text: string): boolean {
   const folded = fold(text);
+  if (watchesIncomingReply(text)) return true;
   if (/\b(trigger|routine)\b/.test(folded)) return true;
   if (/\bremind me\b/.test(folded)) return true;
   if (/\b(every|each)\s+(day|week|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/.test(folded)) return true;

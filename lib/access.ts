@@ -1,6 +1,6 @@
 export type Access = { mode: "open" } | { mode: "password"; password: string } | { mode: "locked" };
 
-// /api/chat spends the gateway token and /api/season reads and writes your records, so a
+// /api/chat and /api/agent spend the gateway token and /api/season reads and writes your records, so a
 // production server only serves them behind KOBE_PASSWORD. `next dev` stays open for local work.
 export function access(): Access {
   const password = process.env.KOBE_PASSWORD;

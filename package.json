@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "vitest run"
+    "test": "vitest run",
+    "import:whatsapp": "tsx --env-file-if-exists=.env.local scripts/import-whatsapp.ts"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.15.23",
@@ -16,6 +17,7 @@
     "@paper-design/shaders-react": "^0.0.81",
     "ai": "^7.0.127",
     "clsx": "^2.1.1",
+    "fflate": "^0.8.3",
     "lucide-react": "^1.52.0",
     "motion": "^14.0.0",
     "next": "16.3.8",
@@ -30,6 +32,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5",
     "vitest": "^5.0.3"
   },

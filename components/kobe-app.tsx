@@ -17,6 +17,7 @@ import { CHANNELS, ENGINE, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person,
 import { game, registerAsk, useGame } from "@/lib/game";
 import { CourtShader } from "./court-shader";
 import { SavedPlanList, SetPlan } from "./plan-panel";
+import { ServiceLogo } from "./service-logo";
 import { BriefCard, ConflictCard, DraftCard, PeopleCard, PlanCard } from "./tool-cards";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
@@ -602,7 +603,7 @@ function Integrations() {
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-2">
                   {g.items.map((it) => (
                     <div key={it.id} className="flex items-center gap-3 rounded-[14px] border border-white/[.08] bg-white/[.035] p-3">
-                      <span className="display grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.07] text-[15px] text-[#CFC7BB]">{it.mono}</span>
+                      <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.07] text-[#CFC7BB]"><ServiceLogo id={it.id} size={22} /></span>
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span className="text-sm font-semibold">{it.name}</span>
                         <span className="truncate text-xs text-[#ACA397]">{it.desc}</span>
@@ -634,7 +635,7 @@ function Integrations() {
             <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2">
               {CHANNELS.map((ch) => (
                 <div key={ch.id} className="flex items-center gap-3 rounded-[14px] border border-white/[.07] bg-white/[.025] p-3">
-                  <span className="display grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.08] text-[14px]">{ch.mono}</span>
+                  <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.08]"><ServiceLogo id={ch.id} size={22} /></span>
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="text-sm font-semibold">{ch.name}</span>
                     <span className="truncate text-xs text-[#ACA397]">{ch.desc}</span>

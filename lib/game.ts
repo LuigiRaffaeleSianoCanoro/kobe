@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { ASSIST_XP, FEED, PLAYS, SEED_ROSTER, type DraftChannel, type FeedItem, type Person, type PlayId } from "./data";
-import { PlanWrite, parseStoredPlans, planIdReuse, recordSupports, samePlan, type Plan } from "./plans";
+import { PlanWrite, applyPlanRemove, applyPlanSave, parseStoredPlans, planIdReuse, plansFromStoredJson, recordSupports, samePlan, type Plan } from "./plans";
 import type { Season, SeasonEvent } from "./season";
 
 export type PlanStorage = "browser" | "postgres" | "session";
@@ -133,6 +133,22 @@ function readStoredPlans(): { plans: Plan[]; blocked: boolean } {
   }
 }
 
+type StoredPlanRead = { plans: Plan[] } | { blocked: true } | { unreadable: true };
+
+function readPlansForUpdate(): StoredPlanRead {
+  if (typeof window === "undefined") return { blocked: true };
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(PLAN_KEY);
+  } catch {
+    return { blocked: true };
+  }
+  if (raw == null) return { plans: [] };
+  const plans = plansFromStoredJson(raw);
+  if (!plans) return { unreadable: true };
+  return { plans };
+}
+
 function writeStoredPlans(plans: Plan[]): boolean {
   try {
     localStorage.setItem(PLAN_KEY, JSON.stringify(plans));
@@ -142,12 +158,117 @@ function writeStoredPlans(plans: Plan[]): boolean {
   }
 }
 
+function withPlanLock<T>(work: () => T): Promise<T> {
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  if (!locks) return Promise.resolve().then(work);
+  return locks.request(PLAN_KEY, work);
+}
+
+let watchingPlans = false;
+
+function watchPlanStorage() {
+  if (watchingPlans || typeof window === "undefined") return;
+  watchingPlans = true;
+  window.addEventListener("storage", (event) => {
+    if (event.key !== PLAN_KEY || persisted || state.planStorage === "session") return;
+    const read = readPlansForUpdate();
+    if (!("plans" in read)) return;
+    set({ plans: knownPlans(read.plans) });
+  });
+}
+
 function knownPlans(plans: Plan[]): Plan[] {
   return plans.filter((plan) => state.people[plan.personId]);
 }
 
 function notSaved(title: string, body: string) {
   game.pushAlert({ at: 0, kind: "NOT SAVED", source: "RECORD", color: "#E5484D", title, body, auto: true });
+}
+
+function rememberPlans(plans: Plan[], storage: GameState["planStorage"] = state.planStorage) {
+  planEpoch++;
+  set({ plans: knownPlans(plans), planStorage: storage });
+}
+
+function savePlanInMemory(plan: Plan): SaveResult {
+  const outcome = applyPlanSave(state.plans, plan);
+  if (outcome.status === "rejected") return { status: "rejected", message: outcome.message };
+  if (outcome.status === "duplicate") return { status: "duplicate" };
+  rememberPlans(outcome.plans);
+  return { status: "saved" };
+}
+
+function commitPlanSave(plan: Plan): SaveResult {
+  const read = readPlansForUpdate();
+  if ("blocked" in read) {
+    const outcome = savePlanInMemory(plan);
+    if (outcome.status === "saved") {
+      set({ planStorage: "session" });
+      notSaved("Stored for this session", "This browser blocked saving the trigger onto their record.");
+    }
+    return outcome;
+  }
+  if ("unreadable" in read) {
+    notSaved("Couldn't save the game plan", "This browser's saved plans could not be read.");
+    return { status: "rejected", message: "Couldn't save that on their record." };
+  }
+  const outcome = applyPlanSave(read.plans, plan);
+  if (outcome.status === "duplicate") {
+    rememberPlans(outcome.plans);
+    return { status: "duplicate" };
+  }
+  if (outcome.status === "rejected") {
+    rememberPlans(outcome.plans);
+    return { status: "rejected", message: outcome.message };
+  }
+  if (!writeStoredPlans(outcome.plans)) {
+    rememberPlans(outcome.plans, "session");
+    notSaved("Stored for this session", "This browser blocked saving the trigger onto their record.");
+    return { status: "saved" };
+  }
+  rememberPlans(outcome.plans);
+  return { status: "saved" };
+}
+
+async function savePlanLocally(plan: Plan): Promise<SaveResult> {
+  if (state.planStorage === "session") return savePlanInMemory(plan);
+  try {
+    return await withPlanLock(() => commitPlanSave(plan));
+  } catch {
+    notSaved("Couldn't save the game plan", "This browser could not update their record.");
+    return { status: "rejected", message: "Couldn't save that on their record." };
+  }
+}
+
+function commitPlanRemove(id: string): void {
+  const read = readPlansForUpdate();
+  if ("blocked" in read) {
+    rememberPlans(applyPlanRemove(state.plans, id), "session");
+    notSaved("Couldn't remove it", "This browser blocked updating their record.");
+    return;
+  }
+  if ("unreadable" in read) {
+    notSaved("Couldn't remove it", "This browser's saved plans could not be read.");
+    return;
+  }
+  const next = applyPlanRemove(read.plans, id);
+  if (!writeStoredPlans(next)) {
+    notSaved("Couldn't remove it", "This browser blocked updating their record.");
+    return;
+  }
+  rememberPlans(next);
+}
+
+async function removePlanLocally(id: string): Promise<void> {
+  if (state.planStorage === "session") {
+    rememberPlans(applyPlanRemove(state.plans, id));
+    return;
+  }
+  try {
+    await withPlanLock(() => commitPlanRemove(id));
+  } catch {
+    notSaved("Couldn't remove it", "This browser could not update their record.");
+  }
 }
 
 type LoggedDraft = { personId?: string; to: string; channel: DraftChannel; body: string; copied: boolean };
@@ -164,6 +285,7 @@ export const game = {
       void refreshPlans();
       return;
     }
+    watchPlanStorage();
     const stored = readStoredPlans();
     set({
       people,
@@ -180,6 +302,8 @@ export const game = {
     const person = state.people[plan.personId];
     if (!person) return { status: "rejected", message: "That person isn't on the roster." };
     if (!recordSupports(person, plan.condition)) return { status: "rejected", message: `${person.name}'s record doesn't have that, so I won't invent it.` };
+    if (!persisted) return savePlanLocally(plan);
+
     const byId = state.plans.find((item) => item.id === plan.id);
     if (byId) return planIdReuse(byId, plan) === "duplicate" ? { status: "duplicate" } : { status: "rejected", message: "That plan id is already on a different record." };
     const existing = state.plans.find((item) => samePlan(item, plan));
@@ -188,14 +312,6 @@ export const game = {
     planEpoch++;
     const prev = state.plans;
     set({ plans: [...prev, plan] });
-    if (!persisted) {
-      if (state.planStorage === "session") return { status: "saved" };
-      if (!writeStoredPlans(state.plans)) {
-        set({ planStorage: "session" });
-        notSaved("Stored for this session", "This browser blocked saving the trigger onto their record.");
-      }
-      return { status: "saved" };
-    }
 
     try {
       const res = await fetch("/api/plans", {
@@ -230,17 +346,11 @@ export const game = {
   },
 
   async removePlan(id: string): Promise<void> {
+    if (!state.plans.some((plan) => plan.id === id)) return;
+    if (!persisted) return removePlanLocally(id);
     planEpoch++;
     const prev = state.plans;
-    if (!prev.some((plan) => plan.id === id)) return;
     set({ plans: prev.filter((plan) => plan.id !== id) });
-    if (!persisted) {
-      if (state.planStorage !== "session" && !writeStoredPlans(state.plans)) {
-        set({ plans: prev, planStorage: "session" });
-        notSaved("Couldn't remove it", "This browser blocked updating their record.");
-      }
-      return;
-    }
     try {
       const res = await fetch("/api/plans", {
         method: "DELETE",

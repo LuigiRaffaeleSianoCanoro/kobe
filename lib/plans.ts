@@ -67,7 +67,7 @@ const SKIP_NAME = new Set([
 ]);
 
 const ACCOUNT =
-  /\b(?:connect(?:ed|ion)?|oauth|inbox|webhook|integrations?|e-?mails?|gmail|outlook|icloud|slack|discord|telegram|whatsapp|instagram|linkedin|fathom|zoom|partiful|luma|eventbrite|calendly|tiktok|facebook|threads|google calendar|gcal)\b|\bwhen\s+[\p{L}'’.-]+(?:\s+[\p{L}'’.-]+){0,2}\s+(?:texts?|dms?|messages?|posts?|emails?|calls?)\b/iu;
+  /\b(?:connect(?:ed|ion)?|oauth|inbox|webhook|integrations?|e-?mails?|gmail|outlook|icloud|slack|discord|telegram|whatsapp|instagram|linkedin|fathom|zoom|partiful|luma|eventbrite|calendly|tiktok|facebook|threads|google calendar|gcal)\b|\b(?:when|if)\s+[\p{L}'’.-]+(?:\s+[\p{L}'’.-]+){0,2}\s+(?:texts?|dms?|messages?|posts?|emails?|calls?|replies|responds|answers|writes?\s+back|gets?\s+back)\b/iu;
 
 export const ACCOUNT_REPLY =
   "No accounts are connected. I can set a trigger or routine from a birthday, last touch, next plan, or open loop already on someone's record.";
@@ -127,6 +127,25 @@ export function samePlan(a: Pick<Plan, "personId" | "kind" | "condition">, b: Pi
   return a.personId === b.personId && a.kind === b.kind && a.condition === b.condition;
 }
 
+export type PlanSaveMerge =
+  | { plans: Plan[]; status: "saved" | "duplicate" }
+  | { plans: Plan[]; status: "rejected"; message: string };
+
+// A tab must merge onto the list it just read. Writing its older memory replaces the other tab's plans.
+export function applyPlanSave(stored: Plan[], plan: Plan): PlanSaveMerge {
+  const byId = stored.find((item) => item.id === plan.id);
+  if (byId) {
+    if (planIdReuse(byId, plan) === "duplicate") return { plans: stored, status: "duplicate" };
+    return { plans: stored, status: "rejected", message: "That plan id is already on a different record." };
+  }
+  if (stored.some((item) => samePlan(item, plan))) return { plans: stored, status: "duplicate" };
+  return { plans: [...stored, plan], status: "saved" };
+}
+
+export function applyPlanRemove(stored: Plan[], id: string): Plan[] {
+  return stored.filter((plan) => plan.id !== id);
+}
+
 export type PlanIdReuse = "duplicate" | "conflict";
 
 // A row that already owns this id can stand in for the save only when it is the same plan.
@@ -176,21 +195,31 @@ export function planFromToolArgs(args: { recordId?: string; personId?: string; k
   });
 }
 
-export function parseStoredPlans(raw: string | null): Plan[] {
-  if (!raw) return [];
+function plansInJson(data: unknown): Plan[] {
+  if (!Array.isArray(data)) return [];
+  const seen = new Set<string>();
+  return data.flatMap((item) => {
+    const parsed = PlanWrite.safeParse(item);
+    if (!parsed.success || seen.has(parsed.data.id)) return [];
+    seen.add(parsed.data.id);
+    return [parsed.data];
+  });
+}
+
+/** Null when the saved value is not a plan list. Callers must not overwrite it. */
+export function plansFromStoredJson(raw: string): Plan[] | null {
   try {
     const data = JSON.parse(raw) as unknown;
-    if (!Array.isArray(data)) return [];
-    const seen = new Set<string>();
-    return data.flatMap((item) => {
-      const parsed = PlanWrite.safeParse(item);
-      if (!parsed.success || seen.has(parsed.data.id)) return [];
-      seen.add(parsed.data.id);
-      return [parsed.data];
-    });
+    if (!Array.isArray(data)) return null;
+    return plansInJson(data);
   } catch {
-    return [];
+    return null;
   }
+}
+
+export function parseStoredPlans(raw: string | null): Plan[] {
+  if (!raw) return [];
+  return plansFromStoredJson(raw) ?? [];
 }
 
 export function recordSupports(person: Pick<PlanPerson, "birthday" | "last" | "next" | "loop">, condition: PlanCondition): boolean {

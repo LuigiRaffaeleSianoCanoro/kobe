@@ -3,6 +3,8 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import {
   PlanWrite,
+  applyPlanRemove,
+  applyPlanSave,
   interpretPlan,
   isPlanAsk,
   mentionsConnectedAccount,
@@ -132,6 +134,10 @@ test("connected accounts are refused", () => {
   for (const line of [
     "Set a trigger when Maya posts on Instagram",
     "Remind me when Dev texts me",
+    "Remind me when Dev replies",
+    "Remind me when Maya responds",
+    "Remind me when Maya writes back",
+    "Remind me if Dev answers",
     "Set a trigger for Maya from Gmail",
     "Connect Slack and add a routine",
   ]) {
@@ -143,6 +149,8 @@ test("connected accounts are refused", () => {
   assert.equal(reconnect.type, "plan");
   const textHer = interpretPlan("Set a weekly routine to text Maya", roster);
   assert.equal(textHer.type, "plan");
+  const replyToDev = interpretPlan("Remind me to reply to Dev", roster);
+  assert.equal(replyToDev.type, "plan");
 });
 
 test("unknown, ambiguous, and missing people stay off invented records", () => {
@@ -257,6 +265,33 @@ test("offline set_plan args use recordId and parse on the card", () => {
   );
   assert.equal(fromPersonId.success, true);
   if (fromPersonId.success) assert.equal(fromPersonId.data.personId, "maya");
+});
+
+test("a second tab merges onto stored plans instead of replacing them", () => {
+  const dev = {
+    id: planId("dev-weekly"),
+    personId: "dev",
+    kind: "routine" as const,
+    condition: "weekly" as const,
+    label: "Check in with Dev every week",
+    prompt: "Draft a reply to Dev",
+  };
+  const maya = {
+    id: planId("maya-birthday"),
+    personId: "maya",
+    kind: "trigger" as const,
+    condition: "birthday" as const,
+    label: "When Maya's birthday is on the record",
+    prompt: "Draft a birthday message for Maya",
+  };
+  const saved = applyPlanSave([dev], maya);
+  assert.equal(saved.status, "saved");
+  if (saved.status === "saved") assert.deepEqual(saved.plans.map((plan) => plan.personId), ["dev", "maya"]);
+  const removed = applyPlanRemove([dev, maya], dev.id);
+  assert.deepEqual(removed.map((plan) => plan.personId), ["maya"]);
+  const conflict = applyPlanSave([maya], { ...dev, id: maya.id });
+  assert.equal(conflict.status, "rejected");
+  if (conflict.status === "rejected") assert.deepEqual(conflict.plans, [maya]);
 });
 
 test("a reused plan id is a conflict when it belongs to someone else", () => {

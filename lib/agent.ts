@@ -1,5 +1,7 @@
 import type { ChatModelAdapter, ThreadMessage } from "@assistant-ui/react";
-import type { RecordId } from "./data";
+import { promptForPerson, type RecordId } from "./data";
+import { rosterNow } from "./game";
+import { interpretPlan } from "./plans";
 
 type ToolCall = { toolName: string; args: Record<string, unknown> };
 type Reply = { text: string; tool?: ToolCall };
@@ -7,6 +9,13 @@ type Reply = { text: string; tool?: ToolCall };
 const person = (id: RecordId, meta: string, right: string) => ({ id, meta, right });
 
 function reply(input: string): Reply {
+  const intent = interpretPlan(
+    input,
+    rosterNow().map((person) => ({ ...person, prompt: promptForPerson(person.id, person.name) })),
+  );
+  if (intent.type === "say") return { text: intent.text };
+  if (intent.type === "plan") return { text: intent.text, tool: { toolName: "set_plan", args: intent.plan } };
+
   const t = input.toLowerCase();
   if (/maya/.test(t) && /(draft|message|write|birthday)/.test(t))
     return {

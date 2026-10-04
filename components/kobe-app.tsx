@@ -16,10 +16,11 @@ import { kobeAdapter } from "@/lib/agent";
 import { CHANNELS, ENGINE, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
 import { game, registerAsk, useGame } from "@/lib/game";
 import { CourtShader } from "./court-shader";
-import { BriefCard, ConflictCard, DraftCard, PeopleCard } from "./tool-cards";
+import { SavedPlanList, SetPlan } from "./plan-panel";
+import { BriefCard, ConflictCard, DraftCard, PeopleCard, PlanCard } from "./tool-cards";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
-const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any conflicts this week?", "Who haven't I talked to lately?"];
+const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any conflicts this week?", "Who haven't I talked to lately?", "Remind me before Maya's birthday"];
 
 // Live: Mastra agent on the Neon AI Gateway via /api/chat. Offline: scripted local agent.
 const transport = new AssistantChatTransport({ api: "/api/chat" });
@@ -321,6 +322,7 @@ function AssistantMessage() {
                   pregame_brief: BriefCard,
                   draft_message: DraftCard,
                   resolve_conflict: ConflictCard,
+                  set_plan: PlanCard,
                 },
               },
             }}
@@ -494,6 +496,10 @@ function GamePlan() {
             </button>
           );
         })}
+        <div className="mt-1 flex flex-col gap-2 border-t border-white/10 pt-2">
+          <SavedPlanList />
+          <SetPlan />
+        </div>
       </div>
     </div>
   );
@@ -692,6 +698,11 @@ function RecordModal() {
             ))}
           </div>
           <div className="rounded-xl bg-gold/10 px-3.5 py-3 text-[13.5px] leading-snug text-[#F4E3BC]">Open loop: {r.loop}</div>
+          <div className="flex flex-col gap-2">
+            <span className="label text-gold">Triggers & routines</span>
+            <SavedPlanList personId={r.id} />
+            <SetPlan personId={r.id} />
+          </div>
           <div className="flex flex-wrap gap-1.5">
             {r.sources.map((s) => (
               <span key={s} className="label rounded-full border border-white/15 px-2 py-1 text-[#CFC7BB]">

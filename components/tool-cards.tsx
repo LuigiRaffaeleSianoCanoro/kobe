@@ -5,6 +5,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { isDraftChannel } from "@/lib/data";
 import { game, useGame } from "@/lib/game";
+import { planDetail, planId, PlanWrite, recordSupports, samePlan, type PlanCondition, type PlanKind } from "@/lib/plans";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 
@@ -208,6 +209,80 @@ export function DraftCard({ args, toolCallId, status }: ToolCallMessagePartProps
 }
 
 type Slot = { title: string; source: string; where: string };
+
+function blockedReason(result: unknown): string | null {
+  if (!result || typeof result !== "object" || !("ok" in result)) return null;
+  const row = result as { ok?: unknown; reason?: unknown };
+  if (row.ok !== false) return null;
+  return typeof row.reason === "string" && row.reason.trim() ? row.reason : "That can't be saved on the record.";
+}
+
+type PlanArgs = { recordId?: string; kind?: PlanKind; condition?: PlanCondition; label?: string; prompt?: string };
+
+export function PlanCard({ args, toolCallId, status, result }: ToolCallMessagePartProps) {
+  const draft = args as PlanArgs;
+  const person = usePerson(draft.recordId);
+  const plans = useGame((s) => s.plans);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const id = planId(toolCallId || "draft");
+  const blocked = blockedReason(result);
+  const parsed = PlanWrite.safeParse({
+    id,
+    personId: draft.recordId ?? "",
+    kind: draft.kind,
+    condition: draft.condition,
+    label: draft.label ?? "",
+    prompt: draft.prompt ?? "",
+  });
+  const ready = status.type !== "running" && parsed.success && !!person && !!draft.condition && recordSupports(person, draft.condition) && !blocked;
+  const stored = plans.find((plan) => parsed.success && (plan.id === id || samePlan(plan, parsed.data)));
+
+  const save = async () => {
+    if (!parsed.success || busy) return;
+    setBusy(true);
+    setError(null);
+    const saved = await game.savePlan(parsed.data);
+    setBusy(false);
+    if (saved.status === "rejected") setError(saved.message);
+  };
+
+  return (
+    <CardIn className="glass flex flex-col gap-3 rounded-2xl border-gold/25! p-4">
+      <div className="label flex items-center gap-2 text-gold">
+        <span>{draft.kind === "routine" ? "Routine" : "Trigger"}</span>
+        <span className="text-chalk-3">On the record</span>
+      </div>
+      {person && draft.label ? (
+        <>
+          <div className="text-[15px] leading-snug">{draft.label}</div>
+          <div className="text-[13px] leading-snug text-[#BDB5AA]">{person.name}{draft.condition ? ` · ${planDetail(person, draft.condition)}` : ""}</div>
+          <p className="text-[12.5px] leading-snug text-chalk-3">This stays on their record. No account is connected.</p>
+        </>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <Shimmer w="70%" />
+          <Shimmer w="45%" />
+        </div>
+      )}
+      {blocked ? (
+        <div className="text-[13px] leading-snug text-red">{blocked}</div>
+      ) : stored ? (
+        <div className="label text-green">{stored.id === id ? "✓ On their record" : "✓ Already on their record"}</div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {error && <div className="text-[13px] leading-snug text-red">{error}</div>}
+          {status.type !== "running" && person && draft.condition && !recordSupports(person, draft.condition) && (
+            <div className="text-[13px] leading-snug text-red">{person.name}&apos;s record doesn&apos;t have that, so I won&apos;t invent it.</div>
+          )}
+          <button type="button" disabled={!ready || busy} onClick={() => void save()} className="press self-start rounded-full bg-gold px-3.5 py-2 text-[12.5px] font-bold text-ink disabled:opacity-50">
+            {busy ? "Saving" : "Save to record"}
+          </button>
+        </div>
+      )}
+    </CardIn>
+  );
+}
 
 export function ConflictCard({ args, toolCallId, status }: ToolCallMessagePartProps) {
   const c = args as Partial<{ slot: string; a: Partial<Slot>; b: Partial<Slot>; draft: Partial<Draft> }>;

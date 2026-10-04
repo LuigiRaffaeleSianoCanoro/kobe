@@ -209,6 +209,12 @@ export const LEVELS = [
   { name: "MAMBA", min: 700 },
 ];
 
+export function promptForPerson(id: string, name: string): string {
+  if (id in RECORDS) return RECORDS[id as RecordId].prompt;
+  const first = name.trim().split(/\s+/)[0] || name;
+  return `Draft a check-in for ${first}`;
+}
+
 export function levelFor(xp: number) {
   let i = 0;
   while (i < LEVELS.length - 1 && xp >= LEVELS[i + 1].min) i++;

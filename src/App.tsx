@@ -57,12 +57,14 @@ function Diamond() {
 export default function App() {
   const scrollRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLInputElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
   const timers = useRef<number[]>([]);
   const recInt = useRef<number | null>(null);
   const voiceI = useRef(-1);
   const aid = useRef(0);
 
   const [vw, setVw] = useState(window.innerWidth);
+  const [headerHeight, setHeaderHeight] = useState(68);
   const [input, setInput] = useState("");
   const [composerPlaceholder, setComposerPlaceholder] = useState(COMPOSER_PLACEHOLDER);
   const [typing, setTyping] = useState(false);
@@ -162,6 +164,19 @@ export default function App() {
     };
   }, [rec, vw]);
 
+  useLayoutEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const measure = () => {
+      const next = el.offsetHeight;
+      setHeaderHeight((prev) => (prev === next ? prev : next));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   const startRec = () => {
     setRec(true);
     setRecSec(0);
@@ -214,9 +229,10 @@ export default function App() {
     const v = a.visible && (wide || shown++ < 1);
     return { ...a, visible: v };
   });
+  const headerDelta = wide ? 0 : Math.max(0, headerHeight - 68);
   const lane = wide
     ? { chatTop: 68, chatRight: 380, laneTop: 76, laneBottom: 104, laneRight: 20, laneW: "340px", laneMask: "linear-gradient(#000 calc(100% - 24px), transparent)" }
-    : { chatTop: 284, chatRight: 0, laneTop: 72, laneBottom: "calc(100vh - 280px)", laneRight: 16, laneW: "calc(100vw - 32px)", laneMask: "none" };
+    : { chatTop: 284 + headerDelta, chatRight: 0, laneTop: 72 + headerDelta, laneBottom: `calc(100vh - ${280 + headerDelta}px)`, laneRight: 16, laneW: "calc(100vw - 32px)", laneMask: "none" };
 
   const pc = D.channels.find((c) => c.id === pairing) ?? D.channels[0];
   const added = !!channels[pc.id];
@@ -228,23 +244,23 @@ export default function App() {
   return (
     <>
       <Court />
-      <header style={{ position: "fixed", top: 0, left: 0, right: 0, height: 68, display: "flex", alignItems: "center", gap: 16, padding: "0 20px", zIndex: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <header ref={headerRef} style={{ position: "fixed", top: 0, left: 0, right: 0, minHeight: 68, boxSizing: "border-box", display: "flex", flexWrap: "wrap", alignItems: "center", alignContent: "center", columnGap: 12, rowGap: 8, padding: "0 16px", zIndex: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "none" }}>
           <Ball size={26} shadow="0 2px 10px rgba(224,113,42,.45)" />
-          <div style={{ fontWeight: 800, fontStretch: "72%", fontSize: 24, letterSpacing: ".01em", lineHeight: 1 }}>
+          <div style={{ fontWeight: 800, fontStretch: "72%", fontSize: 24, letterSpacing: ".01em", lineHeight: 1, whiteSpace: "nowrap" }}>
             KOBE<span style={{ color: "#F2B63A" }}>.AI</span>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 999, background: "rgba(16,12,20,.5)", border: "1px solid rgba(255,255,255,.08)", backdropFilter: "blur(14px)", font: `500 11px ${mono}`, letterSpacing: ".06em", color: "#D9D2C7" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "none", padding: "6px 12px", borderRadius: 999, background: "rgba(16,12,20,.5)", border: "1px solid rgba(255,255,255,.08)", backdropFilter: "blur(14px)", font: `500 11px ${mono}`, letterSpacing: ".06em", color: "#D9D2C7", whiteSpace: "nowrap" }}>
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3DBE8B", boxShadow: "0 0 10px #3DBE8B", animation: "kpulse 1.8s ease-in-out infinite" }} />
           <span>SCOUTING {connectedCount} SOURCES</span>
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <button className="hover-int" onClick={() => setModal("sources")} style={{ display: "flex", alignItems: "center", gap: 8, height: 38, padding: "0 14px", borderRadius: 999, background: "rgba(16,12,20,.6)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,.1)", color: "#F4F1EC", fontSize: 13, fontWeight: 600 }}>
+        <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "flex-end", maxWidth: "100%" }}>
+          <button className="hover-int" onClick={() => setModal("sources")} style={{ display: "flex", alignItems: "center", gap: 8, flex: "none", height: 38, padding: "0 14px", borderRadius: 999, background: "rgba(16,12,20,.6)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,.1)", color: "#F4F1EC", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
             <span>Integrations</span>
             <span style={{ font: `600 11px ${mono}`, padding: "2px 6px", borderRadius: 6, background: "rgba(242,182,58,.18)", color: "#F2B63A" }}>{connectedCount}</span>
           </button>
-          <button className="hover-cream" onClick={() => setModal("channels")} style={{ display: "flex", alignItems: "center", gap: 8, height: 38, padding: "0 16px", borderRadius: 999, background: "#F4F1EC", border: "none", color: "#15110D", fontSize: 13, fontWeight: 700 }}>
+          <button className="hover-cream" onClick={() => setModal("channels")} style={{ display: "flex", alignItems: "center", gap: 8, flex: "none", height: 38, padding: "0 16px", borderRadius: 999, background: "#F4F1EC", border: "none", color: "#15110D", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>
             <span>Add Kobe to…</span>
             {channelCount > 0 && <span style={{ font: `600 11px ${mono}`, padding: "2px 6px", borderRadius: 6, background: "#15110D", color: "#F2B63A" }}>{channelCount}</span>}
           </button>

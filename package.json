@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "vitest run"
+    "test": "vitest run",
+    "import:whatsapp": "tsx --env-file-if-exists=.env.local scripts/import-whatsapp.ts"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.15.23",

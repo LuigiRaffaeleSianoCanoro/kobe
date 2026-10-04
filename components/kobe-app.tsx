@@ -15,9 +15,9 @@ import {
 import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
 import { Mic, Square } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
-import { isLiveConnector } from "@/lib/connectors";
+import { type ConnectorFlags } from "@/lib/connectors";
 import { CHANNELS, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
 import { game, registerAsk, useGame } from "@/lib/game";
 import { LANG_NAMES, dictation, useHydrated, useVoice, voice } from "@/lib/voice";
@@ -25,7 +25,7 @@ import { browserRoster, RosterControl } from "./roster-panel";
 import { CourtShader } from "./court-shader";
 import { SavedPlanList, SetPlan } from "./plan-panel";
 import { ServiceLogo } from "./service-logo";
-import { BriefCard, ConflictCard, DraftCard, PeopleCard, PlanCard } from "./tool-cards";
+import { BriefCard, ConflictCard, ConnectorDraftCard, ConnectorSendCard, DraftCard, GmailSearchCard, PeopleCard, PlanCard, SlackSearchCard } from "./tool-cards";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any conflicts this week?", "Who haven't I talked to lately?", "Remind me before Maya's birthday"];
@@ -36,6 +36,9 @@ const adapters = { dictation };
 
 type Wiring = { roster: Person[]; persisted: boolean };
 
+const ConnectorStatus = createContext<ConnectorFlags>({ gmail: false, slack: false });
+const useConnectorStatus = () => useContext(ConnectorStatus);
+
 function useWire(runtime: AssistantRuntime, { roster, persisted }: Wiring) {
   useEffect(() => {
     registerAsk((text) => runtime.thread.append({ role: "user", content: [{ type: "text", text }] }));
@@ -45,25 +48,26 @@ function useWire(runtime: AssistantRuntime, { roster, persisted }: Wiring) {
   }, [runtime, roster, persisted]);
 }
 
-function LiveKobe(wiring: Wiring) {
+function LiveKobe({ connectors, ...wiring }: Wiring & { connectors: ConnectorFlags }) {
   const runtime = useChatRuntime({ transport, adapters });
   useWire(runtime, wiring);
-  return <Court runtime={runtime} persisted={wiring.persisted} />;
+  return <Court runtime={runtime} persisted={wiring.persisted} connectors={connectors} />;
 }
 
-function ScriptedKobe(wiring: Wiring) {
+function ScriptedKobe({ connectors, ...wiring }: Wiring & { connectors: ConnectorFlags }) {
   const runtime = useLocalRuntime(kobeAdapter, { adapters });
   useWire(runtime, wiring);
-  return <Court runtime={runtime} persisted={wiring.persisted} />;
+  return <Court runtime={runtime} persisted={wiring.persisted} connectors={connectors} />;
 }
 
-export function KobeApp({ live, ...wiring }: Wiring & { live: boolean }) {
-  return live ? <LiveKobe {...wiring} /> : <ScriptedKobe {...wiring} />;
+export function KobeApp({ live, connectors, ...wiring }: Wiring & { live: boolean; connectors: ConnectorFlags }) {
+  return live ? <LiveKobe connectors={connectors} {...wiring} /> : <ScriptedKobe connectors={connectors} {...wiring} />;
 }
 
-function Court({ runtime, persisted }: { runtime: AssistantRuntime; persisted: boolean }) {
+function Court({ runtime, persisted, connectors }: { runtime: AssistantRuntime; persisted: boolean; connectors: ConnectorFlags }) {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
+      <ConnectorStatus.Provider value={connectors}>
       <CourtShader />
       <div className="grain" aria-hidden />
       <Header persisted={persisted} />
@@ -72,6 +76,7 @@ function Court({ runtime, persisted }: { runtime: AssistantRuntime; persisted: b
       <Lane />
       <Integrations />
       <RecordModal />
+      </ConnectorStatus.Provider>
     </AssistantRuntimeProvider>
   );
 }
@@ -120,6 +125,7 @@ function Header({ persisted }: { persisted: boolean }) {
         <RosterControl persisted={persisted} />
         <button onClick={() => game.openModal("sources")} className="glass press flex h-[38px] flex-none items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold whitespace-nowrap">
           Integrations
+          <HeaderLive />
         </button>
         <button onClick={() => game.openModal("channels")} className="press flex h-[38px] flex-none items-center gap-2 rounded-full bg-chalk px-4 text-[13px] font-bold whitespace-nowrap text-ink">
           Add Kobe to…
@@ -335,6 +341,12 @@ function AssistantMessage() {
                   draft_message: DraftCard,
                   resolve_conflict: ConflictCard,
                   set_plan: PlanCard,
+                  gmail_search: GmailSearchCard,
+                  gmail_draft: ConnectorDraftCard,
+                  gmail_send: ConnectorSendCard,
+                  slack_search: SlackSearchCard,
+                  slack_draft: ConnectorDraftCard,
+                  slack_send: ConnectorSendCard,
                 },
               },
             }}
@@ -667,6 +679,10 @@ function Modal({ open, onClose, children, width }: { open: boolean; onClose: () 
   );
 }
 
+function probedLive(id: string, connected: ConnectorFlags) {
+  return (id === "gmail" && connected.gmail) || (id === "slack" && connected.slack);
+}
+
 function LiveBadge() {
   return <span className="label flex-none rounded-md bg-green/15 px-1.5 py-0.5 text-[10px] text-green">LIVE</span>;
 }
@@ -675,8 +691,22 @@ function NotConnected() {
   return <span className="label flex-none rounded-md bg-white/[.07] px-1.5 py-0.5 text-[10px] text-chalk-3">NOT CONNECTED</span>;
 }
 
+function HeaderLive() {
+  const connected = useConnectorStatus();
+  if (!connected.gmail && !connected.slack) return null;
+  return <LiveBadge />;
+}
+
+function connectedNote(connected: ConnectorFlags) {
+  const names = [connected.gmail ? "Gmail" : null, connected.slack ? "Slack" : null].filter((name): name is string => !!name);
+  if (names.length === 0) return null;
+  const verb = names.length > 1 ? "are" : "is";
+  return `${names.join(" and ")} ${verb} connected. Kobe can search and draft there, and sending waits for an explicit confirm.`;
+}
+
 function Integrations() {
   const modal = useGame((s) => s.modal);
+  const connected = useConnectorStatus();
   const close = () => game.openModal(null);
   const tab = modal === "channels" ? "channels" : "sources";
   return (
@@ -700,7 +730,7 @@ function Integrations() {
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Scouting sources</div>
               <div className="text-sm text-[#BDB5AA]">
-                Gmail and Slack are the live connectors. Every other source stays on this device and does not send.
+                {connectedNote(connected) ?? "Gmail and Slack are the live connectors. Every other source stays on this device and does not send."}
               </div>
             </div>
             {SOURCE_GROUPS.map((g) => (
@@ -712,9 +742,9 @@ function Integrations() {
                       <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.07] text-[#CFC7BB]"><ServiceLogo id={it.id} size={22} /></span>
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span className="text-sm font-semibold">{it.name}</span>
-                        <span className="truncate text-xs text-[#ACA397]">{isLiveConnector(it.id) ? "Live connector" : "Not connected"}</span>
+                        <span className="truncate text-xs text-[#ACA397]">{probedLive(it.id, connected) ? "Live connector" : "Not connected"}</span>
                       </span>
-                      {isLiveConnector(it.id) ? <LiveBadge /> : <NotConnected />}
+                      {probedLive(it.id, connected) ? <LiveBadge /> : <NotConnected />}
                     </div>
                   ))}
                 </div>
@@ -725,7 +755,7 @@ function Integrations() {
           <>
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Put Kobe in your rotation</div>
-              <div className="text-sm text-[#BDB5AA]">Slack can send. Telegram, WhatsApp, and Discord are not connected.</div>
+              <div className="text-sm text-[#BDB5AA]">{connectedNote(connected) ?? "Slack can send. Telegram, WhatsApp, and Discord are not connected."}</div>
             </div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2">
               {CHANNELS.map((ch) => (
@@ -733,9 +763,9 @@ function Integrations() {
                   <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.08]"><ServiceLogo id={ch.id} size={22} /></span>
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="text-sm font-semibold">{ch.name}</span>
-                    <span className="truncate text-xs text-[#ACA397]">{isLiveConnector(ch.id) ? "Live connector" : "Not connected"}</span>
+                    <span className="truncate text-xs text-[#ACA397]">{probedLive(ch.id, connected) ? "Live connector" : "Not connected"}</span>
                   </span>
-                  {isLiveConnector(ch.id) ? <LiveBadge /> : <NotConnected />}
+                  {probedLive(ch.id, connected) ? <LiveBadge /> : <NotConnected />}
                 </div>
               ))}
             </div>

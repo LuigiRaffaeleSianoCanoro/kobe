@@ -3,10 +3,12 @@
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
+  ErrorPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
   useLocalRuntime,
   type AssistantRuntime,
+  type EmptyMessagePartProps,
 } from "@assistant-ui/react";
 import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
 import { Dithering } from "@paper-design/shaders-react";
@@ -292,7 +294,8 @@ function AgentText({ text }: { text: string }) {
   );
 }
 
-function Thinking() {
+function Thinking({ status }: EmptyMessagePartProps) {
+  if (status.type !== "running") return null;
   return (
     <div className="glass flex gap-1.5 self-start rounded-[4px_18px_18px_18px] px-4 py-3.5">
       {[0, 0.15, 0.3].map((d) => (
@@ -325,6 +328,11 @@ function AssistantMessage() {
               },
             }}
           />
+          <MessagePrimitive.Error>
+            <ErrorPrimitive.Root className="glass self-start rounded-[4px_18px_18px_18px] px-4 py-3 text-[15px] leading-normal [text-wrap:pretty]">
+              <ErrorPrimitive.Message />
+            </ErrorPrimitive.Root>
+          </MessagePrimitive.Error>
         </div>
       </motion.div>
     </MessagePrimitive.Root>

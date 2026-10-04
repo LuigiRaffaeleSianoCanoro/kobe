@@ -16,7 +16,12 @@ function parse(raw: string): unknown {
   }
 }
 
+const MODEL_ERROR = "Kobe couldn't reach the model. Check the Neon AI Gateway credentials.";
+
 export async function POST(req: Request) {
+  if (!req.headers.get("content-type")?.startsWith("application/json")) {
+    return Response.json({ error: "Expected application/json." }, { status: 415 });
+  }
   const raw = await req.text();
   if (raw.length > MAX_BODY_CHARS) return Response.json({ error: "This conversation is too long. Reload to start a new one." }, { status: 413 });
   const parsed = await safeValidateUIMessages({ messages: parse(raw) });
@@ -30,11 +35,20 @@ export async function POST(req: Request) {
   const ui = createUIMessageStream({
     originalMessages: messages,
     execute: ({ writer }) => {
-      writer.merge(toAISdkStream(stream, { from: "agent", version: "v7" }));
+      writer.merge(
+        toAISdkStream(stream, {
+          from: "agent",
+          version: "v7",
+          onError: (error) => {
+            console.error("[kobe] agent error", error);
+            return MODEL_ERROR;
+          },
+        }),
+      );
     },
     onError: (error) => {
       console.error("[kobe] agent error", error);
-      return "Kobe couldn't reach the model. Check the Neon AI Gateway credentials.";
+      return MODEL_ERROR;
     },
   });
   return createUIMessageStreamResponse({ stream: ui });

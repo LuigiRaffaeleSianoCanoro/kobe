@@ -333,7 +333,7 @@ export default function App() {
       <div style={{ position: "fixed", left: 0, right: lane.chatRight, bottom: 22, zIndex: 10, padding: "0 16px" }}>
         <div style={{ maxWidth: 720, margin: "0 auto", display: "flex", alignItems: "center", gap: 10, padding: "8px 8px 8px 20px", borderRadius: 999, background: "rgba(16,12,20,.72)", backdropFilter: "blur(20px) saturate(150%)", border: "1px solid rgba(255,255,255,.12)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
           {!rec ? (
-            <input ref={composerRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runAgent(input); }} placeholder={composerPlaceholder} style={{ flex: "1 1 0%", minWidth: 0, height: 40, background: "transparent", border: "none", outline: "none", color: "#F4F1EC", font: "400 15.5px 'Archivo', system-ui, sans-serif" }} />
+            <input ref={composerRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runAgent(input); }} placeholder={composerPlaceholder} aria-label={COMPOSER_PLACEHOLDER} style={{ flex: "1 1 0%", minWidth: 0, height: 40, background: "transparent", border: "none", outline: "none", color: "#F4F1EC", font: "400 15.5px 'Archivo', system-ui, sans-serif" }} />
           ) : (
             <div style={{ flex: 1, minWidth: 0, height: 40, display: "flex", alignItems: "center", gap: 12, animation: "kfade .2s ease both" }}>
               <span style={{ font: `600 12px ${mono}`, letterSpacing: ".08em", color: "#E5484D" }}>● 0:{String(recSec).padStart(2, "0")}</span>

@@ -59,7 +59,7 @@ export function PersonReport({
   const view = person;
 
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,5,4,.5)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, animation: "kfade .2s ease both" }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(8,5,4,.5)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, animation: "kfade .2s ease both" }}>
       <div onClick={(event) => event.stopPropagation()} style={{ width: "min(460px, 100%)", maxHeight: "86vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 18, padding: 22, borderRadius: 24, background: "rgba(18,13,16,.92)", backdropFilter: "blur(26px)", border: "1px solid rgba(255,255,255,.1)", boxShadow: "0 40px 100px rgba(0,0,0,.6)", animation: "kpop .45s cubic-bezier(.2,1.25,.4,1) both" }}>
         {editing && form ? (
           <>

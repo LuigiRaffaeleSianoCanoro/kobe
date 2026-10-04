@@ -119,6 +119,14 @@ export const game = {
     sync();
   },
 
+  upsertPerson(person: Person) {
+    set((s) => ({ people: { ...s.people, [person.id]: person } }));
+  },
+
+  replacePeople(people: Person[]) {
+    set({ people: byId(people) });
+  },
+
   pushAlert(a: FeedItem & { auto?: boolean }) {
     const id = ++uid;
     set((s) => ({ alerts: [...s.alerts, { ...a, id, visible: true }] }));

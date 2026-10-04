@@ -15,6 +15,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { kobeAdapter } from "@/lib/agent";
 import { CHANNELS, ENGINE, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
 import { game, registerAsk, useGame } from "@/lib/game";
+import { browserRoster, RosterControl } from "./roster-panel";
 import { CourtShader } from "./court-shader";
 import { BriefCard, ConflictCard, DraftCard, PeopleCard } from "./tool-cards";
 
@@ -29,7 +30,8 @@ type Wiring = { roster: Person[]; persisted: boolean };
 function useWire(runtime: AssistantRuntime, { roster, persisted }: Wiring) {
   useEffect(() => {
     registerAsk((text) => runtime.thread.append({ role: "user", content: [{ type: "text", text }] }));
-    game.load(roster, persisted);
+    // Postgres is the roster the agent and the season log share. Without it, records stay in this browser.
+    game.load(persisted ? roster : browserRoster(roster), persisted);
     return game.startFeed();
   }, [runtime, roster, persisted]);
 }
@@ -37,26 +39,26 @@ function useWire(runtime: AssistantRuntime, { roster, persisted }: Wiring) {
 function LiveKobe({ model, ...wiring }: Wiring & { model: string }) {
   const runtime = useChatRuntime({ transport });
   useWire(runtime, wiring);
-  return <Court runtime={runtime} engine={`LIVE AGENT · ${model.replace(/^neon\//, "").toUpperCase()} · SAMPLE FEED & CALENDAR`} />;
+  return <Court runtime={runtime} persisted={wiring.persisted} engine={`LIVE AGENT · ${model.replace(/^neon\//, "").toUpperCase()} · SAMPLE FEED & CALENDAR`} />;
 }
 
 function ScriptedKobe(wiring: Wiring) {
   const runtime = useLocalRuntime(kobeAdapter);
   useWire(runtime, wiring);
-  return <Court runtime={runtime} engine="OFFLINE DEMO · SCRIPTED AGENT · SAMPLE DATA" />;
+  return <Court runtime={runtime} persisted={wiring.persisted} engine="OFFLINE DEMO · SCRIPTED AGENT · SAMPLE DATA" />;
 }
 
 export function KobeApp({ live, model, ...wiring }: Wiring & { live: boolean; model: string }) {
   return live ? <LiveKobe model={model} {...wiring} /> : <ScriptedKobe {...wiring} />;
 }
 
-function Court({ runtime, engine }: { runtime: AssistantRuntime; engine: string }) {
+function Court({ runtime, engine, persisted }: { runtime: AssistantRuntime; engine: string; persisted: boolean }) {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <span className="label pointer-events-none fixed top-[calc(var(--header-h)-4px)] right-5 left-5 z-20 truncate text-[9.5px] text-chalk-3">{engine}</span>
       <CourtShader />
       <div className="grain" aria-hidden />
-      <Header />
+      <Header persisted={persisted} />
       <Thread />
       <Composer />
       <Lane />
@@ -87,7 +89,7 @@ function Ball({ size = 26, line = 1.5 }: { size?: number; line?: number }) {
   );
 }
 
-function Header() {
+function Header({ persisted }: { persisted: boolean }) {
   const ref = useRef<HTMLElement>(null);
   // The header wraps to a second row when its items overflow; everything pinned below it reads --header-h.
   useLayoutEffect(() => {
@@ -111,6 +113,7 @@ function Header() {
       </div>
       <SeasonHud />
       <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
+        <RosterControl persisted={persisted} />
         <button onClick={() => game.openModal("sources")} className="glass press flex h-[38px] flex-none items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold whitespace-nowrap">
           Integrations
           <span className="label rounded-md bg-gold/20 px-1.5 py-0.5 text-gold">SOON</span>
@@ -131,7 +134,7 @@ function SeasonHud() {
   const lvl = levelFor(xp);
   const reduce = useReducedMotion();
   return (
-    <div className="glass relative hidden items-center gap-3 rounded-full py-1 pr-4 pl-1 lg:flex">
+    <div aria-label={`Season ${lvl.name}, ${xp} XP, streak ${streak} days, ${assists} assists`} className="glass relative hidden items-center gap-3 rounded-full py-1 pr-4 pl-1 lg:flex">
       <motion.span
         key={lvl.name}
         initial={reduce ? false : { opacity: 0, transform: "scale(0.9)", filter: "blur(4px)" }}
@@ -250,7 +253,7 @@ function Hero() {
         ))}
       </h1>
       <p className="max-w-[520px] text-base leading-normal text-chalk-2 [text-wrap:pretty]">
-        Never miss a birthday, double-book a night, or walk into a conversation cold. This demo runs on a sample roster, feed and calendar. Inbox and social integrations are not connected yet.
+        Never miss a birthday, double-book a night, or walk into a conversation cold. The feed and calendar are sample data. Inbox and social integrations are not connected yet.
       </p>
       <div className="mt-1.5 flex flex-wrap gap-2">
         {CHIPS.map((c, i) => (
@@ -587,7 +590,7 @@ function Integrations() {
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Scouting sources</div>
               <div className="text-sm text-[#BDB5AA]">
-                None of these are connected yet. Kobe will read them to build context and never post on your behalf. Today it runs on a sample roster, feed and calendar.
+                None of these are connected yet. Kobe will read them to build context and never post on your behalf. Today the feed and calendar are sample data.
               </div>
             </div>
             {SOURCE_GROUPS.map((g) => (

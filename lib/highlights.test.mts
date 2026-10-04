@@ -210,7 +210,9 @@ test("a failed save drops only the note that failed", () => {
   assert.equal(samePerson.people.marcus, afterSecond);
 
   const source = readFileSync(new URL("./game.ts", import.meta.url), "utf8");
-  const rollback = source.slice(source.indexOf("Drop only this note"), source.indexOf("NOT SAVED"));
+  const marker = source.indexOf("Drop only this note");
+  assert.notEqual(marker, -1);
+  const rollback = source.slice(marker, source.indexOf("NOT SAVED", marker));
   assert.match(rollback, /undoFailedDraft/);
   assert.equal(rollback.includes("beforeTouches"), false);
 });

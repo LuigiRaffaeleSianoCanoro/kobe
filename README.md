@@ -11,6 +11,7 @@ Built for the Build Personal Agents Hack. MIT licensed, every dependency is open
 - **Message drafts you send yourself.** Kobe cannot send messages. "Copy for Instagram" copies the draft to your clipboard and logs the touch on that person's record. With Postgres, the draft text is stored with it.
 - **Season mode.** XP, levels (Rookie → Mamba), a streak of consecutive active days, assists for every draft you log, and a three-play game plan per day.
 - **Weekly highlights.** A mixtape of what this week already has on the people stored in the app: dated fields, talking points, open loops, and drafts you logged. The sample calendar can add an entry it already has. Integrations stay unconnected.
+- **Game plan you set.** From chat or the game-plan panel, set a trigger or a routine on a person already in the roster. A trigger reads a birthday, last touch, next plan, or open loop already on that record. A routine is a daily or weekly check-in. With Postgres it is stored in `plans` on that person. Without a database it is stored in this browser. Setting one does not connect an inbox, calendar, or social account.
 - **Scouting reports** per person with a rapport score that rises as you keep in touch.
 - **Postgres (optional).** The roster and season stats persist in Postgres. Without a database they live in memory for the session.
 
@@ -20,7 +21,7 @@ The scouting feed, the calendar, and the five people in the seed roster are a sc
 
 ## The agent
 
-Kobe is a Mastra agent (`lib/kobe-agent.ts`) served from `/api/chat` and streamed into assistant-ui as an AI SDK v7 UI message stream. It reasons over the roster (from Postgres, or the seed when there is no database) and the sample calendar, and answers by calling one of five tools: `show_people`, `pregame_brief`, `draft_message`, `resolve_conflict`, `weekly_highlights`. The page and the agent read the same roster, so the cards show the same people the agent sees.
+Kobe is a Mastra agent (`lib/kobe-agent.ts`) served from `/api/chat` and streamed into assistant-ui as an AI SDK v7 UI message stream. It reasons over the roster (from Postgres, or the seed when there is no database) and the sample calendar, and answers by calling one of six tools: `show_people`, `pregame_brief`, `draft_message`, `resolve_conflict`, `weekly_highlights`, `set_plan`. The page and the agent read the same roster, so the cards show the same people the agent sees.
 
 There is no agent memory. The browser sends the whole thread with each message.
 

@@ -7,7 +7,7 @@
     "dev:vite": "vite",
     "build": "next build",
     "start": "next start",
-    "test": "vitest run && node --experimental-strip-types --test lib/highlights.test.mts src/agent.test.ts lib/access.test.ts server/server-env.test.ts",
+    "test": "vitest run && node --experimental-strip-types --import ./test/register.mjs --test lib/highlights.test.mts lib/plans.test.ts lib/touch-log.test.ts src/agent.test.ts lib/access.test.ts server/server-env.test.ts",
     "import:whatsapp": "tsx --env-file-if-exists=.env.local scripts/import-whatsapp.ts"
   },
   "dependencies": {

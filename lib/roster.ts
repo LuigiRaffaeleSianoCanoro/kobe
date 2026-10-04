@@ -2,7 +2,7 @@ import { SEED_ROSTER, type Person } from "./data";
 import { sql } from "./db";
 import { capRecentTouches, type TouchNote } from "./highlights";
 
-export { SAMPLE_CALENDAR } from "./data";
+export { SAMPLE_CALENDAR } from "./calendar";
 
 // The page and /api/chat both read the roster here, so the agent and the cards see the same people.
 // The seed covers a missing, unreachable or empty database, so the roster is never empty.
@@ -22,7 +22,7 @@ export async function loadRoster(): Promise<Person[]> {
   return SEED_ROSTER;
 }
 
-// Drafts the user copied are the only notes stored besides the record itself.
+// Newest drafts in the last two weeks. An ascending limit would keep the oldest rows and drop this week.
 export async function loadTouches(): Promise<TouchNote[]> {
   if (!sql) return [];
   try {

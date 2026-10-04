@@ -1,6 +1,7 @@
 import { Agent } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
+import { VOICE_STYLE } from "./chat-request";
 import { connectorInstructions, connectorMailbox, createConnectorTools, liveConnectors, type LiveConnectors, type Mailbox } from "./connectors";
 import { DRAFT_CHANNELS, type Person } from "./data";
 import { conditionFits, mentionsConnectedAccount, planDetail, recordSupports, PLAN_CONDITIONS } from "./plans";
@@ -10,7 +11,7 @@ import { SAMPLE_CALENDAR, loadRoster } from "./roster";
 // agent can later point at a self-hosted OpenAI-compatible server running the same model.
 const MODEL = process.env.KOBE_MODEL ?? "neon/gpt-oss-120b";
 
-function instructions(roster: Person[], flags: { gmail: boolean; slack: boolean }) {
+function instructions(roster: Person[], flags: { gmail: boolean; slack: boolean }, voice: boolean) {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   return `You are Kobe, a personal relationship agent. Mamba mentality applied to the people who matter: show up prepared and never miss the small things.
 
@@ -30,10 +31,10 @@ ROSTER:
 ${JSON.stringify(roster)}
 
 CALENDAR:
-${JSON.stringify(SAMPLE_CALENDAR)}`;
+${JSON.stringify(SAMPLE_CALENDAR)}${voice ? `\n\n${VOICE_STYLE}` : ""}`;
 }
 
-export async function buildKobeAgent(options?: { connectors?: LiveConnectors; mailbox?: Mailbox }) {
+export async function buildKobeAgent(options?: { connectors?: LiveConnectors; mailbox?: Mailbox; voice?: boolean }) {
   const roster = await loadRoster();
   const connectors = options?.connectors ?? (await liveConnectors());
   const mailbox = options?.mailbox ?? connectorMailbox;
@@ -114,7 +115,7 @@ export async function buildKobeAgent(options?: { connectors?: LiveConnectors; ma
   return new Agent({
     id: "kobe",
     name: "Kobe",
-    instructions: instructions(roster, flags),
+    instructions: instructions(roster, flags, options?.voice ?? false),
     model: MODEL,
     tools: {
       show_people,

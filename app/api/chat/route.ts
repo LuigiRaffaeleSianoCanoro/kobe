@@ -1,6 +1,7 @@
 import { toAISdkStream } from "@mastra/ai-sdk";
 import { RequestContext } from "@mastra/core/request-context";
 import { createUIMessageStream, createUIMessageStreamResponse, safeValidateUIMessages } from "ai";
+import { parseChatRequest } from "@/lib/chat-request";
 import { USER_TEXT } from "@/lib/connectors";
 import { buildKobeAgent } from "@/lib/kobe-agent";
 
@@ -10,14 +11,6 @@ export const maxDuration = 60;
 const MAX_BODY_CHARS = 100_000;
 const MAX_MESSAGES = 30;
 
-function parse(raw: string): unknown {
-  try {
-    return (JSON.parse(raw) as { messages?: unknown }).messages;
-  } catch {
-    return undefined;
-  }
-}
-
 const MODEL_ERROR = "Kobe couldn't reach the model. Check the Neon AI Gateway credentials.";
 
 export async function POST(req: Request) {
@@ -26,7 +19,8 @@ export async function POST(req: Request) {
   }
   const raw = await req.text();
   if (raw.length > MAX_BODY_CHARS) return new Response("This conversation is too long. Reload to start a new one.", { status: 413 });
-  const parsed = await safeValidateUIMessages({ messages: parse(raw) });
+  const request = parseChatRequest(raw);
+  const parsed = await safeValidateUIMessages({ messages: request.messages });
   if (!parsed.success) return new Response("Invalid messages.", { status: 400 });
   // Instructions come from the server only.
   const messages = parsed.data.filter((m) => m.role !== "system").slice(-MAX_MESSAGES);
@@ -34,7 +28,7 @@ export async function POST(req: Request) {
   const requestContext = new RequestContext();
   requestContext.setRaw(USER_TEXT, lastUserText(messages));
 
-  const agent = await buildKobeAgent();
+  const agent = await buildKobeAgent({ voice: request.voice });
   const stream = await agent.stream(messages, { maxSteps: 3, requestContext });
 
   const ui = createUIMessageStream({

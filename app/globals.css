@@ -129,8 +129,9 @@ body {
   mask-image: linear-gradient(transparent, #000 36px, #000 calc(100% - 20px), transparent);
 }
 
-/* Listening: a gold ring breathes out from the mic. */
-.listening {
+/* Listening or speaking: a gold ring breathes out from the button. */
+.listening,
+.speaking {
   animation: listen 1.6s var(--ease-out) infinite;
 }
 @keyframes listen {
@@ -146,5 +147,5 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .grain { animation: none; }
   .ball, .ball:active, .ball:hover { transform: none; }
-  .listening { animation: none; box-shadow: 0 0 0 4px rgba(242, 182, 58, 0.3); }
+  .listening, .speaking { animation: none; box-shadow: 0 0 0 4px rgba(242, 182, 58, 0.3); }
 }

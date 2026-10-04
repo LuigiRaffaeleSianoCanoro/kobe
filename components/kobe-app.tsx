@@ -1,26 +1,29 @@
 "use client";
 
 import {
+  ActionBarPrimitive,
   AssistantRuntimeProvider,
   AuiIf,
   ComposerPrimitive,
   ErrorPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
+  useAui,
+  useAuiEvent,
   useAuiState,
   useLocalRuntime,
   type AssistantRuntime,
   type EmptyMessagePartProps,
 } from "@assistant-ui/react";
 import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
-import { Mic, Square } from "lucide-react";
+import { Mic, Square, Volume2, VolumeX } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
 import { type ConnectorFlags } from "@/lib/connectors";
 import { CHANNELS, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
 import { game, registerAsk, useGame } from "@/lib/game";
-import { LANG_NAMES, dictation, useHydrated, useVoice, voice } from "@/lib/voice";
+import { LANG_NAMES, dictation, speech, useHydrated, useVoice, voice } from "@/lib/voice";
 import { CourtShader } from "./court-shader";
 import { SavedPlanList, SetPlan } from "./plan-panel";
 import { ServiceLogo } from "./service-logo";
@@ -30,8 +33,9 @@ const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any conflicts this week?", "Who haven't I talked to lately?", "Remind me before Maya's birthday"];
 
 // Live: Mastra agent on the Neon AI Gateway via /api/chat. Offline: scripted local agent.
-const transport = new AssistantChatTransport({ api: "/api/chat" });
-const adapters = { dictation };
+// A spoken turn sends only a flag; /api/chat owns the words it adds to the instructions.
+const transport = new AssistantChatTransport({ api: "/api/chat", body: () => (voice.isVoiceTurn() ? { voice: true } : {}) });
+const adapters = { dictation, speech };
 
 type Wiring = { roster: Person[]; persisted: boolean };
 
@@ -68,6 +72,7 @@ function Court({ runtime, connectors }: { runtime: AssistantRuntime; connectors:
       <ConnectorStatus.Provider value={connectors}>
       <CourtShader />
       <div className="grain" aria-hidden />
+      <VoiceReplies />
       <Header />
       <Thread />
       <Composer />
@@ -353,10 +358,78 @@ function AssistantMessage() {
               <ErrorPrimitive.Message />
             </ErrorPrimitive.Root>
           </MessagePrimitive.Error>
+          <ReadAloud />
         </div>
       </motion.div>
     </MessagePrimitive.Root>
   );
+}
+
+// A speaker under a finished reply. It reads the text parts only, never the cards.
+function ReadAloud() {
+  const hydrated = useHydrated();
+  const handoff = useFocusHandoff();
+  if (!hydrated || !speech) return null;
+  return (
+    <AuiIf condition={(s) => s.message.status?.type !== "running" && s.message.parts.some((p) => p.type === "text" && p.text.length > 0)}>
+      <ActionBarPrimitive.Root className="-mt-1.5 flex">
+        <AuiIf condition={(s) => s.message.speech == null}>
+          <ActionBarPrimitive.Speak asChild>
+            <button {...handoff} title="Read aloud" aria-label="Read aloud" className="press grid h-7 w-7 place-items-center rounded-full text-chalk-3 hover:text-gold">
+              <Volume2 size={15} aria-hidden />
+            </button>
+          </ActionBarPrimitive.Speak>
+        </AuiIf>
+        <AuiIf condition={(s) => s.message.speech != null}>
+          <ActionBarPrimitive.StopSpeaking asChild>
+            <button {...handoff} title="Stop reading" aria-label="Stop reading" className="speaking press grid h-7 w-7 place-items-center rounded-full bg-gold text-ink">
+              <Square size={9} fill="currentColor" aria-hidden />
+            </button>
+          </ActionBarPrimitive.StopSpeaking>
+        </AuiIf>
+      </ActionBarPrimitive.Root>
+    </AuiIf>
+  );
+}
+
+// Voice mode: Kobe hushes on every send and reads a voice turn's reply aloud once it is complete.
+// thread.runEnd fires before the message leaves "running", so this watches the message itself.
+function VoiceReplies() {
+  const aui = useAui();
+  const awaiting = useRef(false);
+  const settled = useAuiState((s) => {
+    const last = s.thread.messages.at(-1);
+    return last?.role === "assistant" && last.status?.type !== "running" ? last.id : null;
+  });
+  useAuiEvent("composer.send", () => {
+    voice.send();
+    awaiting.current = true;
+  });
+  useEffect(() => {
+    if (!settled || !awaiting.current) return;
+    awaiting.current = false;
+    const reply = aui.thread.message({ id: settled });
+    if (reply.getState().status?.type !== "complete" || !speech || !voice.shouldSpeakReply() || aui.composer.getState().dictation) return;
+    reply.speak();
+  }, [aui, settled]);
+  return null;
+}
+
+// Some controls swap one button for another (mic and stop). Keep keyboard focus on whichever shows.
+function useFocusHandoff(onClick?: () => void) {
+  const refocus = useRef(false);
+  return {
+    onClick: (e: MouseEvent<HTMLButtonElement>) => {
+      refocus.current = document.activeElement === e.currentTarget;
+      onClick?.();
+    },
+    ref: (el: HTMLButtonElement | null) => {
+      if (el && refocus.current && el !== document.activeElement) {
+        refocus.current = false;
+        el.focus();
+      }
+    },
+  };
 }
 
 /* ───────────────────────── Composer ───────────────────────── */
@@ -407,6 +480,7 @@ function Composer() {
           aria-label={PLACEHOLDER}
           className="h-10 min-w-0 flex-1 resize-none bg-transparent py-2.5 text-[15.5px] text-chalk outline-none placeholder:text-chalk-3"
         />
+        <MuteToggle />
         <Dictation />
         <ComposerPrimitive.Send asChild>
           <button title="Send" className="ball flex-none rounded-full shadow-[0_6px_18px_rgba(224,113,42,.45)] disabled:opacity-60">
@@ -424,7 +498,7 @@ function Dictation() {
   const lang = useVoice((s) => s.lang);
   const listening = useAuiState((s) => s.composer.dictation != null);
   const [local, setLocal] = useState(false);
-  const refocus = useRef(false);
+  const handoff = useFocusHandoff(() => voice.notify(null));
   useEffect(() => {
     let live = true;
     dictation?.prepare().then(() => live && setLocal(!!dictation?.isLocal()));
@@ -434,19 +508,6 @@ function Dictation() {
   }, [lang]);
   if (!hydrated || !dictation) return null;
 
-  // Starting or stopping swaps the button. Keep keyboard focus on whichever one is showing.
-  const handoff = {
-    onClick: (e: MouseEvent<HTMLButtonElement>) => {
-      refocus.current = document.activeElement === e.currentTarget;
-      voice.notify(null);
-    },
-    ref: (el: HTMLButtonElement | null) => {
-      if (el && refocus.current && el !== document.activeElement) {
-        refocus.current = false;
-        el.focus();
-      }
-    },
-  };
   const other = lang === "es" ? "en" : "es";
   const dictate = `Dictate in ${LANG_NAMES[lang]}${local ? ", on this device" : ""}`;
   return (
@@ -476,6 +537,25 @@ function Dictation() {
         </ComposerPrimitive.StopDictation>
       </AuiIf>
     </>
+  );
+}
+
+// Mutes the replies Kobe reads on its own. A tap on a message's speaker still reads it.
+function MuteToggle() {
+  const hydrated = useHydrated();
+  const muted = useVoice((s) => s.muted);
+  if (!hydrated || !speech || !dictation) return null;
+  return (
+    <button
+      type="button"
+      aria-pressed={muted}
+      onClick={() => voice.setMuted(!muted)}
+      title={muted ? "Kobe's voice is muted" : "Mute Kobe's voice"}
+      aria-label="Mute Kobe's voice"
+      className="press grid h-8 w-8 flex-none place-items-center rounded-full text-chalk-3 hover:text-gold"
+    >
+      {muted ? <VolumeX size={16} aria-hidden /> : <Volume2 size={16} aria-hidden />}
+    </button>
   );
 }
 

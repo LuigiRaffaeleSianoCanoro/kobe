@@ -18,20 +18,20 @@ const T0 = new Date("2026-10-04T09:12:00").getTime();
 
 // Clicks and keystrokes, in video seconds.
 const actions = [
-  { at: 4.45, click: "mayaDraft" },
-  { at: 7.15, click: "sendIG" },
+  { at: 4.45, click: "mayaDraft", drift: true },
+  { at: 7.15, click: "sendIG", drift: true },
   { at: 9.05, click: "input", fx: 0.25 },
   { at: 9.2, type: "Brief me on Marcus", cps: 24 },
   { at: 10.15, key: "Enter" },
   { at: 12.55, click: "fullReport" },
-  { at: 14.95, click: "closeRecord" },
-  { at: 15.8, click: "resolve" },
-  { at: 18.45, click: "sendWA" },
-  { at: 20.15, click: "integrations" },
-  { at: 20.95, click: "linkedin", fx: 0.88 },
-  { at: 21.5, click: "zoomSrc", fx: 0.88 },
-  { at: 22.5, click: "tabChannels" },
-  { at: 23.35, click: "sentCode" },
+  { at: 14.75, click: "closeRecord" },
+  { at: 15.6, click: "resolve", drift: true },
+  { at: 18.05, click: "sendWA", drift: true },
+  { at: 19.55, click: "integrations" },
+  { at: 20.35, click: "linkedin", fx: 0.88 },
+  { at: 20.95, click: "zoomSrc", fx: 0.88 },
+  { at: 22.1, click: "tabChannels" },
+  { at: 22.95, click: "sentCode", drift: true },
 ];
 
 // Cursor glides onto each click target just before the click.
@@ -42,7 +42,7 @@ const moves = actions
     return { at: a.at - dur - 0.1, dur, target: a.click, fx: a.fx, fy: a.fy };
   });
 moves.push({ at: 9.12, dur: 0.5, x: 1000, y: 690 });
-for (const at of [4.45, 7.15, 15.8, 18.45, 23.35]) moves.push({ at: at + 0.2, dur: 0.7, rel: { dx: 36, dy: 70 } });
+for (const a of actions) if (a.drift) moves.push({ at: a.at + 0.2, dur: 0.7, rel: { dx: 36, dy: 70 } });
 
 const camKeys = [
   { at: 0, z: 1 },
@@ -52,15 +52,15 @@ const camKeys = [
   { at: 8.85, target: "input", z: 1.28, dy: -170 },
   { at: 10.25, target: "chatTail", z: 1.28 },
   { at: 12.65, target: "modal", z: 1.14 },
-  { at: 15.05, target: "conflictAlert", z: 1.3, dx: -60 },
-  { at: 15.95, target: "chatTail", z: 1.24 },
-  { at: 19.15, z: 1 },
-  { at: 20.25, target: "modal", z: 1.1 },
+  { at: 14.85, target: "conflictAlert", z: 1.3, dx: -60 },
+  { at: 15.75, target: "chatTail", z: 1.24 },
+  { at: 18.55, z: 1 },
+  { at: 19.65, target: "modal", z: 1.1 },
   { at: 24.9, z: 1 },
 ];
 
 // App clock (ms) advanced per video frame; the app's alert feed is keyed off it.
-const clockRate = (t) => (t < 1.4 ? 0 : t >= 23.35 && t < 24.1 ? 2 : 1);
+const clockRate = (t) => (t < 1.4 ? 0 : t >= 22.95 && t < 23.7 ? 2 : 1);
 
 mkdirSync(out, { recursive: true });
 const previewDir = join(out, "preview");

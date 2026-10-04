@@ -49,10 +49,10 @@
   const CAPTIONS = [
     { a: 2.45, b: 4.5, k: "COURTSIDE", text: "Kobe scouts your inbox, calendar & socials" },
     { a: 4.6, b: 9.0, k: "01 · BIRTHDAYS", text: "Never miss a <em>birthday.</em>" },
-    { a: 9.1, b: 15.05, k: "02 · PREGAME", text: "Never walk in <em>cold.</em>" },
-    { a: 15.15, b: 19.45, k: "03 · CONFLICTS", text: "Never double-book a <em>night.</em>" },
-    { a: 19.55, b: 22.35, k: "04 · SOURCES", text: "Reads 18 sources. <em>Never posts.</em>" },
-    { a: 22.45, b: 25.0, k: "05 · CHANNELS", text: "Text Kobe on <em>Telegram, WhatsApp, Slack</em>" },
+    { a: 9.1, b: 14.85, k: "02 · PREGAME", text: "Never walk in <em>cold.</em>" },
+    { a: 14.95, b: 18.85, k: "03 · CONFLICTS", text: "Never double-book a <em>night.</em>" },
+    { a: 18.95, b: 21.95, k: "04 · SOURCES", text: "Reads 18 sources. <em>Never posts.</em>" },
+    { a: 22.05, b: 25.0, k: "05 · CHANNELS", text: "Text Kobe on <em>Telegram, WhatsApp, Slack</em>" },
   ];
 
   const D = (window.__demo = {

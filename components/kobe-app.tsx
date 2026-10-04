@@ -12,7 +12,7 @@ import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-s
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
-import { CHANNELS, ENGINE, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
+import { CHANNELS, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
 import { game, registerAsk, useGame } from "@/lib/game";
 import { CourtShader } from "./court-shader";
 import { BriefCard, ConflictCard, DraftCard, PeopleCard } from "./tool-cards";
@@ -581,17 +581,6 @@ function Integrations() {
                 </div>
               </div>
             ))}
-            <div className="flex flex-col gap-2.5 rounded-2xl border border-dashed border-white/15 p-4">
-              <span className="label text-chalk-3">UNDER THE HOOD · BUILD PERSONAL AGENTS HACK</span>
-              <div className="flex flex-wrap gap-2">
-                {ENGINE.map((e) => (
-                  <span key={e.name} className="flex items-baseline gap-2 rounded-full border border-white/12 px-3 py-1.5">
-                    <span className="text-[13px] font-semibold">{e.name}</span>
-                    <span className="label text-[9.5px] text-chalk-3">{e.job}</span>
-                  </span>
-                ))}
-              </div>
-            </div>
           </>
         ) : (
           <>

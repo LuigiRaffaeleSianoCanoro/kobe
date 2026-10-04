@@ -76,6 +76,14 @@ export function mentionsConnectedAccount(text: string): boolean {
   return ACCOUNT.test(text);
 }
 
+// Watching for a reply is an inbox, not a weekly check-in. Birthday, quiet, and next-up asks name a field on the record and do not match this.
+const INCOMING_REPLY =
+  /\b(?:when|if|once)\b[\s\S]{0,80}?\b(?:replies|reply|responds|respond|answers|answer|writes?\s+back|gets?\s+back)\b/iu;
+
+export function watchesIncomingReply(text: string): boolean {
+  return INCOMING_REPLY.test(text);
+}
+
 export function conditionFits(kind: PlanKind, condition: PlanCondition): boolean {
   return kind === "trigger" ? TRIGGERS.has(condition) : ROUTINES.has(condition);
 }
@@ -176,21 +184,42 @@ export function planFromToolArgs(args: { recordId?: string; personId?: string; k
   });
 }
 
-export function parseStoredPlans(raw: string | null): Plan[] {
-  if (!raw) return [];
+/** Null when the stored value cannot be merged. Empty storage is an empty list, not a failure. */
+export function plansFromStoredJson(raw: string | null): Plan[] | null {
+  if (raw == null) return [];
+  let data: unknown;
   try {
-    const data = JSON.parse(raw) as unknown;
-    if (!Array.isArray(data)) return [];
-    const seen = new Set<string>();
-    return data.flatMap((item) => {
-      const parsed = PlanWrite.safeParse(item);
-      if (!parsed.success || seen.has(parsed.data.id)) return [];
-      seen.add(parsed.data.id);
-      return [parsed.data];
-    });
+    data = JSON.parse(raw);
   } catch {
-    return [];
+    return null;
   }
+  if (!Array.isArray(data)) return null;
+  const seen = new Set<string>();
+  return data.flatMap((item) => {
+    const parsed = PlanWrite.safeParse(item);
+    if (!parsed.success || seen.has(parsed.data.id)) return [];
+    seen.add(parsed.data.id);
+    return [parsed.data];
+  });
+}
+
+export function parseStoredPlans(raw: string | null): Plan[] {
+  return plansFromStoredJson(raw) ?? [];
+}
+
+export function insertPlanRecord(
+  stored: readonly Plan[],
+  plan: Plan,
+): { status: "saved"; plans: Plan[] } | { status: "duplicate"; plans: Plan[] } | { status: "conflict" } {
+  const byId = stored.find((item) => item.id === plan.id);
+  if (byId) return planIdReuse(byId, plan) === "duplicate" ? { status: "duplicate", plans: [...stored] } : { status: "conflict" };
+  const same = stored.find((item) => samePlan(item, plan));
+  if (same) return { status: "duplicate", plans: [...stored] };
+  return { status: "saved", plans: [...stored, plan] };
+}
+
+export function withoutPlan(stored: readonly Plan[], id: string): Plan[] {
+  return stored.filter((item) => item.id !== id);
 }
 
 export function recordSupports(person: Pick<PlanPerson, "birthday" | "last" | "next" | "loop">, condition: PlanCondition): boolean {
@@ -262,7 +291,7 @@ export function isPlanAsk(text: string): boolean {
 
 export function interpretPlan(text: string, people: PlanPerson[]): PlanIntent {
   if (!isPlanAsk(text)) return { type: "ignore" };
-  if (mentionsConnectedAccount(text)) return { type: "say", text: ACCOUNT_REPLY };
+  if (mentionsConnectedAccount(text) || watchesIncomingReply(text)) return { type: "say", text: ACCOUNT_REPLY };
 
   const spec = detectSpec(fold(text));
   const found = matchPeople(text, people);
@@ -309,7 +338,10 @@ function detectSpec(folded: string): { type: "ready"; kind: PlanKind; condition:
   }
   const specific = specificTrigger(folded);
   if (specific) return { type: "ready", kind: "trigger", condition: specific };
-  if (/\bremind me\b/.test(folded)) return { type: "ready", kind: "routine", condition: daily && !weekly ? "daily" : "weekly" };
+  // A bare reminder can be a weekly check-in. One that waits on a reply is refused earlier.
+  if (/\bremind me\b/.test(folded) && !/\b(?:when|if|once)\b/.test(folded)) {
+    return { type: "ready", kind: "routine", condition: daily && !weekly ? "daily" : "weekly" };
+  }
   return { type: "missing" };
 }
 

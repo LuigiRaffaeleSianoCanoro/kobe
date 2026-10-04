@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import {
   PlanWrite,
+  insertPlanRecord,
   interpretPlan,
   isPlanAsk,
   mentionsConnectedAccount,
@@ -13,6 +14,7 @@ import {
   planId,
   planIdForCard,
   planIdReuse,
+  plansFromStoredJson,
   recordSupports,
   type PlanPerson,
 } from "./plans.ts";
@@ -126,6 +128,57 @@ test("a daily routine is not a trigger", () => {
   assert.equal(intent.plan.kind, "routine");
   assert.equal(intent.plan.condition, "daily");
   assert.equal(intent.plan.personId, "priya");
+});
+
+test("watching for a reply is refused instead of becoming a weekly check-in", () => {
+  for (const line of [
+    "Remind me when Dev replies",
+    "Remind me when Maya responds",
+    "Remind me when Maya writes back",
+    "Remind me if Dev answers",
+    "Remind me to message Maya when she replies",
+  ]) {
+    const intent = interpretPlan(line, roster);
+    assert.equal(intent.type, "say", line);
+    if (intent.type !== "say") continue;
+    assert.match(intent.text, /No accounts are connected/);
+    assert.equal("plan" in intent, false);
+  }
+  const birthday = interpretPlan("Remind me before Maya's birthday", roster);
+  assert.equal(birthday.type, "plan");
+  const sunday = interpretPlan("Every Sunday, check in with Dev", roster);
+  assert.equal(sunday.type, "plan");
+  if (sunday.type === "plan") assert.equal(sunday.plan.condition, "weekly");
+});
+
+test("a second tab's plan is kept when this tab saves another", () => {
+  const dev = {
+    id: planId("tab-dev"),
+    personId: "dev",
+    kind: "routine" as const,
+    condition: "weekly" as const,
+    label: "Check in with Dev every Sunday",
+    prompt: "Draft a reply to Dev",
+  };
+  const maya = {
+    id: planId("tab-maya"),
+    personId: "maya",
+    kind: "trigger" as const,
+    condition: "birthday" as const,
+    label: "When Maya's birthday is on the record",
+    prompt: "Draft a birthday message for Maya",
+  };
+  const merged = insertPlanRecord([dev], maya);
+  assert.equal(merged.status, "saved");
+  if (merged.status !== "saved") return;
+  assert.deepEqual(merged.plans.map((plan) => plan.personId), ["dev", "maya"]);
+  const again = insertPlanRecord(merged.plans, { ...maya, id: planId("other-maya") });
+  assert.equal(again.status, "duplicate");
+  if (again.status === "duplicate") assert.equal(again.plans.length, 2);
+  const clash = insertPlanRecord(merged.plans, { ...dev, id: maya.id, personId: "dev" });
+  assert.equal(clash.status, "conflict");
+  assert.equal(plansFromStoredJson("{"), null);
+  assert.deepEqual(plansFromStoredJson(null), []);
 });
 
 test("connected accounts are refused", () => {

@@ -9,11 +9,11 @@ import {
   type AssistantRuntime,
 } from "@assistant-ui/react";
 import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
-import { Dithering } from "@paper-design/shaders-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
-import { CHANNELS, ENGINE, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
+import { isLiveConnector } from "@/lib/connectors";
+import { CHANNELS, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
 import { game, registerAsk, useGame } from "@/lib/game";
 import { CourtShader } from "./court-shader";
 import { SavedPlanList, SetPlan } from "./plan-panel";
@@ -36,26 +36,26 @@ function useWire(runtime: AssistantRuntime, { roster, persisted }: Wiring) {
   }, [runtime, roster, persisted]);
 }
 
-function LiveKobe({ model, ...wiring }: Wiring & { model: string }) {
+function LiveKobe(wiring: Wiring) {
   const runtime = useChatRuntime({ transport });
   useWire(runtime, wiring);
-  return <Court runtime={runtime} engine={`LIVE AGENT · ${model.replace(/^neon\//, "").toUpperCase()} · SAMPLE FEED & CALENDAR`} />;
+  return <Court runtime={runtime} />;
 }
 
 function ScriptedKobe(wiring: Wiring) {
   const runtime = useLocalRuntime(kobeAdapter);
   useWire(runtime, wiring);
-  return <Court runtime={runtime} engine="OFFLINE DEMO · SCRIPTED AGENT · SAMPLE DATA" />;
+  return <Court runtime={runtime} />;
 }
 
-export function KobeApp({ live, model, ...wiring }: Wiring & { live: boolean; model: string }) {
-  return live ? <LiveKobe model={model} {...wiring} /> : <ScriptedKobe {...wiring} />;
+export function KobeApp({ live, ...wiring }: Wiring & { live: boolean; model?: string }) {
+  const { roster, persisted } = wiring;
+  return live ? <LiveKobe roster={roster} persisted={persisted} /> : <ScriptedKobe roster={roster} persisted={persisted} />;
 }
 
-function Court({ runtime, engine }: { runtime: AssistantRuntime; engine: string }) {
+function Court({ runtime }: { runtime: AssistantRuntime }) {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <span className="label pointer-events-none fixed top-[calc(var(--header-h)-4px)] right-5 left-5 z-20 truncate text-[9.5px] text-chalk-3">{engine}</span>
       <CourtShader />
       <div className="grain" aria-hidden />
       <Header />
@@ -107,15 +107,10 @@ function Header() {
           KOBE<span className="text-gold">.AI</span>
         </span>
       </div>
-      <div className="glass label hidden items-center gap-2 rounded-full px-3 py-1.5 whitespace-nowrap text-[#D9D2C7] md:flex">
-        <span className="h-[7px] w-[7px] rounded-full bg-gold" />
-        DEMO · SAMPLE DATA
-      </div>
       <SeasonHud />
       <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
         <button onClick={() => game.openModal("sources")} className="glass press flex h-[38px] flex-none items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold whitespace-nowrap">
           Integrations
-          <span className="label rounded-md bg-gold/20 px-1.5 py-0.5 text-gold">SOON</span>
         </button>
         <button onClick={() => game.openModal("channels")} className="press flex h-[38px] flex-none items-center gap-2 rounded-full bg-chalk px-4 text-[13px] font-bold whitespace-nowrap text-ink">
           Add Kobe to…
@@ -224,19 +219,7 @@ function Hero() {
     [],
   );
   return (
-    <div className="relative mb-5 flex flex-col gap-3.5">
-      <div className="pointer-events-none absolute -top-6 right-0 hidden h-40 w-40 sm:block" aria-hidden>
-        <Dithering
-          style={{ width: "100%", height: "100%" }}
-          colorBack="#00000000"
-          colorFront="#E0712A"
-          shape="sphere"
-          type="4x4"
-          size={2}
-          scale={0.62}
-          speed={reduce ? 0 : 0.6}
-        />
-      </div>
+    <div className="mb-5 flex flex-col gap-3.5">
       <span className="label text-gold">COURTSIDE · {today}</span>
       <h1 className="display max-w-[560px] text-[clamp(52px,8.5vw,92px)] [text-wrap:balance]">
         {["Know", "your", "people."].map((w, i) => (
@@ -252,7 +235,7 @@ function Hero() {
         ))}
       </h1>
       <p className="max-w-[520px] text-base leading-normal text-chalk-2 [text-wrap:pretty]">
-        Never miss a birthday, double-book a night, or walk into a conversation cold. This demo runs on a sample roster, feed and calendar. Inbox and social integrations are not connected yet.
+        Never miss a birthday, double-book a night, or walk into a conversation cold.
       </p>
       <div className="mt-1.5 flex flex-wrap gap-2">
         {CHIPS.map((c, i) => (
@@ -565,8 +548,12 @@ function Modal({ open, onClose, children, width }: { open: boolean; onClose: () 
   );
 }
 
-function Soon() {
-  return <span className="label flex-none rounded-md bg-white/[.07] px-1.5 py-0.5 text-[10px] text-chalk-3">SOON</span>;
+function LiveBadge() {
+  return <span className="label flex-none rounded-md bg-green/15 px-1.5 py-0.5 text-[10px] text-green">LIVE</span>;
+}
+
+function NotConnected() {
+  return <span className="label flex-none rounded-md bg-white/[.07] px-1.5 py-0.5 text-[10px] text-chalk-3">NOT CONNECTED</span>;
 }
 
 function Integrations() {
@@ -594,7 +581,7 @@ function Integrations() {
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Scouting sources</div>
               <div className="text-sm text-[#BDB5AA]">
-                None of these are connected yet. Kobe will read them to build context and never post on your behalf. Today it runs on a sample roster, feed and calendar.
+                Gmail and Slack are the live connectors. Every other source stays on this device and does not send.
               </div>
             </div>
             {SOURCE_GROUPS.map((g) => (
@@ -606,31 +593,20 @@ function Integrations() {
                       <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.07] text-[#CFC7BB]"><ServiceLogo id={it.id} size={22} /></span>
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span className="text-sm font-semibold">{it.name}</span>
-                        <span className="truncate text-xs text-[#ACA397]">{it.desc}</span>
+                        <span className="truncate text-xs text-[#ACA397]">{isLiveConnector(it.id) ? "Live connector" : "Not connected"}</span>
                       </span>
-                      <Soon />
+                      {isLiveConnector(it.id) ? <LiveBadge /> : <NotConnected />}
                     </div>
                   ))}
                 </div>
               </div>
             ))}
-            <div className="flex flex-col gap-2.5 rounded-2xl border border-dashed border-white/15 p-4">
-              <span className="label text-chalk-3">UNDER THE HOOD · BUILD PERSONAL AGENTS HACK</span>
-              <div className="flex flex-wrap gap-2">
-                {ENGINE.map((e) => (
-                  <span key={e.name} className="flex items-baseline gap-2 rounded-full border border-white/12 px-3 py-1.5">
-                    <span className="text-[13px] font-semibold">{e.name}</span>
-                    <span className="label text-[9.5px] text-chalk-3">{e.job}</span>
-                  </span>
-                ))}
-              </div>
-            </div>
           </>
         ) : (
           <>
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Put Kobe in your rotation</div>
-              <div className="text-sm text-[#BDB5AA]">Coming soon: talk to Kobe wherever you already message. For now Kobe lives on this page.</div>
+              <div className="text-sm text-[#BDB5AA]">Slack can send. Telegram, WhatsApp, and Discord are not connected.</div>
             </div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2">
               {CHANNELS.map((ch) => (
@@ -638,9 +614,9 @@ function Integrations() {
                   <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.08]"><ServiceLogo id={ch.id} size={22} /></span>
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="text-sm font-semibold">{ch.name}</span>
-                    <span className="truncate text-xs text-[#ACA397]">{ch.desc}</span>
+                    <span className="truncate text-xs text-[#ACA397]">{isLiveConnector(ch.id) ? "Live connector" : "Not connected"}</span>
                   </span>
-                  <Soon />
+                  {isLiveConnector(ch.id) ? <LiveBadge /> : <NotConnected />}
                 </div>
               ))}
             </div>

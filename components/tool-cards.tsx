@@ -3,6 +3,7 @@
 import type { ToolCallMessagePartProps } from "@assistant-ui/react";
 import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
+import { deliverDraft } from "@/lib/connectors";
 import { isDraftChannel } from "@/lib/data";
 import { game, useGame } from "@/lib/game";
 import { planDetail, planFromToolArgs, planIdForCard, recordSupports, samePlan, type PlanCondition, type PlanKind } from "@/lib/plans";
@@ -139,18 +140,35 @@ export function BriefCard({ args, result }: ToolCallMessagePartProps) {
 type Draft = { recordId: string; channel: string; body: string };
 
 function DraftBody({ draft, logKey, ready }: { draft: Partial<Draft>; logKey: string; ready: boolean }) {
-  const logged = useGame((s) => !!s.logged[logKey]);
+  const sent = useGame((s) => !!s.sent[logKey]);
   const person = usePerson(draft.recordId);
   const [edited, setEdited] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   const body = edited ?? draft.body ?? "";
   const to = person?.name ?? draft.recordId ?? "";
   const channel = isDraftChannel(draft.channel) ? draft.channel : undefined;
 
-  const copyAndLog = async () => {
-    if (!channel) return;
+  const copyDraft = async () => {
+    if (!channel || !body) return;
     const copied = (await navigator.clipboard?.writeText(body).then(() => true, () => false)) ?? false;
-    game.logDraft(logKey, { personId: person?.id, to, channel, body, copied });
+    setNotice(copied ? "Copied. Not sent." : "Couldn't copy. Not sent.");
+  };
+  const sendDraft = async () => {
+    if (!ready || !body || sending || sent) return;
+    if (!channel) {
+      setNotice("That channel is not connected.");
+      return;
+    }
+    setSending(true);
+    const result = await deliverDraft(channel, { to, body });
+    setSending(false);
+    if (!result.ok) {
+      setNotice(result.reason);
+      return;
+    }
+    game.recordSent(logKey, { personId: person?.id, to, channel, body });
   };
   return (
     <>
@@ -173,28 +191,34 @@ function DraftBody({ draft, logKey, ready }: { draft: Partial<Draft>; logKey: st
           {!ready && <span className="ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 animate-pulse bg-gold" />}
         </p>
       )}
-      {logged ? (
+      {sent ? (
         <motion.div
           initial={{ opacity: 0, transform: "translateY(4px)" }}
           animate={{ opacity: 1, transform: "translateY(0px)" }}
           transition={{ duration: 0.25, ease: EASE_OUT }}
           className="label text-green"
         >
-          ✓ ASSIST LOGGED{person ? " · RAPPORT +3" : ""}
+          ✓ SENT{person ? " · RAPPORT +3" : ""}
         </motion.div>
       ) : (
-        <div className="flex gap-2">
-          <button
-            disabled={!ready || !body || !channel}
-            onClick={copyAndLog}
-            className="press rounded-full bg-gold px-3.5 py-2 text-[12.5px] font-bold text-ink disabled:opacity-50"
-          >
-            Copy for {draft.channel ?? "…"}
-          </button>
-          <button disabled={!ready} onClick={() => setEditing((e) => !e)} className="press rounded-full border border-white/15 px-3.5 py-2 text-[12.5px] disabled:opacity-50">
-            {editing ? "Done" : "Edit"}
-          </button>
-        </div>
+        <>
+          {notice && <div className="text-[12.5px] text-[#BDB5AA]">{notice}</div>}
+          <div className="flex flex-wrap gap-2">
+            <button
+              disabled={!ready || !body || !channel}
+              onClick={copyDraft}
+              className="press rounded-full bg-gold px-3.5 py-2 text-[12.5px] font-bold text-ink disabled:opacity-50"
+            >
+              Copy for {draft.channel ?? "…"}
+            </button>
+            <button disabled={!ready || !body || sending} onClick={sendDraft} className="press rounded-full border border-white/15 px-3.5 py-2 text-[12.5px] disabled:opacity-50">
+              {sending ? "Sending" : "Send"}
+            </button>
+            <button disabled={!ready} onClick={() => setEditing((e) => !e)} className="press rounded-full border border-white/15 px-3.5 py-2 text-[12.5px] disabled:opacity-50">
+              {editing ? "Done" : "Edit"}
+            </button>
+          </div>
+        </>
       )}
     </>
   );

@@ -124,6 +124,26 @@ body {
   transform: rotate(180deg) scale(0.94);
 }
 
+.field {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  color: var(--chalk);
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+}
+.field:focus {
+  outline: none;
+  border-color: rgba(242, 182, 58, 0.7);
+}
+textarea.field {
+  resize: vertical;
+  min-height: 72px;
+}
+
 .chat-mask {
   -webkit-mask-image: linear-gradient(transparent, #000 36px, #000 calc(100% - 20px), transparent);
   mask-image: linear-gradient(transparent, #000 36px, #000 calc(100% - 20px), transparent);

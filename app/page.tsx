@@ -9,7 +9,7 @@ import { loadRoster, loadTouches } from "@/lib/roster";
 export const dynamic = "force-dynamic";
 
 export default async function Page() {
-  // A production server without KOBE_PASSWORD is public: serve the local roster and never read real records.
+  // A production server without KOBE_PASSWORD is public: serve the sample roster and never read real records.
   const api = access().mode !== "locked";
   const live = api && !!process.env.NEON_AI_GATEWAY_TOKEN && !!process.env.NEON_AI_GATEWAY_BASE_URL;
   const connectors = api ? await connectorFlags() : { gmail: false, slack: false };

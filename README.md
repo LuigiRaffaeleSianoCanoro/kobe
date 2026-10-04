@@ -6,13 +6,16 @@ Built for the Build Personal Agents Hack. MIT licensed, every dependency is open
 
 ## What works today
 
+The home page is the courtside chat, the season meters, and the roster.
+
 - **Chat with Kobe** built on [assistant-ui](https://www.assistant-ui.com) primitives. Replies stream in and render tool calls as cards: people lists, pregame briefs, message drafts, and schedule conflicts.
-- **Live agent (optional).** With Neon AI Gateway credentials, `/api/chat` runs a [Mastra](https://mastra.ai) agent over your roster. Without them, a scripted offline agent answers a few questions with the same cards.
-- **Message drafts you send yourself.** "Copy for Instagram" copies the draft to your clipboard and logs the touch on that person's record. With Postgres, the draft text is stored with it. Gmail and Slack can search and draft when those accounts are connected. Sending either one waits until you explicitly confirm.
-- **Season mode.** XP, levels (Rookie → Mamba), a streak of consecutive active days, assists for every draft you log, and a three-play game plan per day.
+- **Live agent.** With Neon AI Gateway credentials, the composer sends the thread to `/api/chat`, which runs a [Mastra](https://mastra.ai) agent over your roster.
+- **Roster.** Roster lists everyone Kobe knows. Add person creates a record, and Edit record changes it. Empty fields stay empty. With `DATABASE_URL`, that write goes to Postgres, so the live agent and the season log see the same person. Without a database, the roster stays in this browser.
+- **Message drafts you send yourself.** Copying a draft does not send it. Gmail and Slack can search and draft when those accounts are connected. Sending either one waits until you explicitly confirm, and a draft created in the same turn cannot be sent. With Postgres, rapport goes up only after the database accepts the save. If it rejects the save, the page says the record was not saved.
+- **Season mode.** XP, levels (Rookie → Mamba), a streak of consecutive active days, assists for every draft you log, and a three-play game plan per day. The meters sit in the header from 1024px up and follow the header when it wraps.
 - **Game plan you set.** From chat or the game-plan panel, set a trigger or a routine on a person already in the roster. A trigger reads a birthday, last touch, next plan, or open loop already on that record. A routine is a daily or weekly check-in. With Postgres it is stored in `plans` on that person. Without a database it is stored in this browser. Setting one does not connect an inbox, calendar, or social account.
 - **Scouting reports** per person with a rapport score that rises as you keep in touch.
-- **Postgres (optional).** The roster and season stats persist in Postgres. Without a database they live in memory for the session.
+- **Postgres (optional).** The roster and season stats persist in Postgres. Without a database, season stats stay in memory for the session and the roster stays in the browser.
 
 ## What is sample data
 
@@ -20,7 +23,7 @@ The scouting feed, the calendar, and the five people in the seed roster are a sc
 
 ## The agent
 
-Kobe is a Mastra agent (`lib/kobe-agent.ts`) served from `/api/chat` and streamed into assistant-ui as an AI SDK v7 UI message stream. It reasons over the roster (from Postgres, or the seed when there is no database) and the sample calendar, and answers by calling one of four tools: `show_people`, `pregame_brief`, `draft_message`, `resolve_conflict`. When Gmail or Slack is really connected, the agent also gets that account's search and draft tools. Send tools do nothing until the latest message is an explicit confirmation, or you confirm on the draft card. The page and the agent read the same roster, so the cards show the same people the agent sees.
+Kobe is a Mastra agent (`lib/kobe-agent.ts`) served from `/api/chat` and streamed into assistant-ui as an AI SDK v7 UI message stream. It reasons over the roster (from Postgres, or the seed when there is no database) and the sample calendar, and answers by calling one of four tools: `show_people`, `pregame_brief`, `draft_message`, `resolve_conflict`. With Postgres, the page and the agent read the same `people` table, so a person you add is who the cards and the next reply see. When Gmail or Slack is really connected, the agent also gets that account's search and draft tools. Send tools do nothing until the latest message is an explicit confirmation, or you confirm on the draft card. A draft created in the same turn cannot be sent.
 
 There is no agent memory. The browser sends the whole thread with each message.
 
@@ -33,7 +36,7 @@ pnpm install
 pnpm dev
 ```
 
-That runs the offline demo. For the live agent or persistence, copy `env.local.template` to `.env.local` (with the leading dot) and fill in what you need:
+That starts the app. For the live agent or persistence, copy `env.local.template` to `.env.local` (with the leading dot) and fill in what you need:
 
 ```bash
 # Any Postgres 15+ (Neon, Supabase, or the one in docker-compose.yml)
@@ -75,7 +78,7 @@ Set `KOBE_OWNER_NAME` in `.env.local` to your name as WhatsApp shows it, or pass
 
 ## Access
 
-`/api/chat` spends your gateway credits, and `/api/season` and `/api/imports` read and write your records. A production server (`next start` or Docker) only serves them when `KOBE_PASSWORD` is set, and then asks for that password in the browser before showing anything. Without `KOBE_PASSWORD`, production serves the offline demo with the sample roster and never touches the database or the gateway. `pnpm dev` stays open, so keep it on your own machine.
+`/api/chat` spends your gateway credits, and `/api/season` and `/api/imports` read and write your records. A production server (`next start` or Docker) only serves them when `KOBE_PASSWORD` is set, and then asks for that password in the browser before showing anything. Without `KOBE_PASSWORD`, production serves the sample roster and never touches the database or the gateway. `pnpm dev` stays open, so keep it on your own machine.
 
 ## Self-host
 

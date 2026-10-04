@@ -27,6 +27,7 @@ import { weeklyMixtape, type TouchNote } from "@/lib/highlights";
 import { NOTE_MAX, clipFrom } from "@/lib/tape";
 import { LANG_NAMES, dictation, useHydrated, useVoice, voice } from "@/lib/voice";
 import { describeImport, whatsAppAttachments, type ImportResult } from "@/lib/whatsapp/upload";
+import { browserRoster, RosterControl } from "./roster-panel";
 import { CourtShader } from "./court-shader";
 import { HighlightsCard, MixtapeView } from "./mixtape";
 import { SavedPlanList, SetPlan } from "./plan-panel";
@@ -36,7 +37,7 @@ import { BriefCard, ConflictCard, ConnectorDraftCard, ConnectorSendCard, DraftCa
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any conflicts this week?", "Who haven't I talked to lately?", "Remind me before Maya's birthday", "This week's mixtape"];
 
-// Live: Mastra agent on the Neon AI Gateway via /api/chat. The local runtime answers when that is unavailable.
+// The home page composer posts to /api/chat and sends coaching notes with the thread.
 const transport = new AssistantChatTransport({
   api: "/api/chat",
   fetch: async (input, init) => {
@@ -91,7 +92,8 @@ function useWire(runtime: AssistantRuntime, { roster, persisted, touches = [] }:
       runtime.thread.append({ role: "user", content: [{ type: "text", text: file.name }], startRun: false });
       runtime.thread.append({ role: "assistant", content: [{ type: "data", name: "whatsapp-import", data: card }], startRun: false });
     };
-    game.load(roster, persisted, touches);
+    // Postgres is the roster the agent and the season log share. Without it, records stay in this browser.
+    game.load(persisted ? roster : browserRoster(roster), persisted, touches);
     return game.startFeed();
   }, [runtime, roster, persisted, touches]);
 }
@@ -100,21 +102,21 @@ function LiveKobe({ connectors, ...wiring }: Wiring & { connectors: ConnectorFla
   const adapters = wiring.persisted ? WITH_IMPORTS : NO_FILES;
   const runtime = useChatRuntime({ transport, adapters });
   useWire(runtime, wiring);
-  return <Court runtime={runtime} connectors={connectors} imports={wiring.persisted} />;
+  return <Court runtime={runtime} persisted={wiring.persisted} connectors={connectors} />;
 }
 
 function ScriptedKobe({ connectors, ...wiring }: Wiring & { connectors: ConnectorFlags }) {
   const adapters = wiring.persisted ? WITH_IMPORTS : NO_FILES;
   const runtime = useLocalRuntime(kobeAdapter, { adapters });
   useWire(runtime, wiring);
-  return <Court runtime={runtime} connectors={connectors} imports={wiring.persisted} />;
+  return <Court runtime={runtime} persisted={wiring.persisted} connectors={connectors} />;
 }
 
 export function KobeApp({ live, connectors, ...wiring }: Wiring & { live: boolean; connectors: ConnectorFlags }) {
   return live ? <LiveKobe connectors={connectors} {...wiring} /> : <ScriptedKobe connectors={connectors} {...wiring} />;
 }
 
-function Court({ runtime, connectors, imports }: { runtime: AssistantRuntime; connectors: ConnectorFlags; imports: boolean }) {
+function Court({ runtime, persisted, connectors }: { runtime: AssistantRuntime; persisted: boolean; connectors: ConnectorFlags }) {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ConnectorStatus.Provider value={connectors}>
@@ -122,11 +124,11 @@ function Court({ runtime, connectors, imports }: { runtime: AssistantRuntime; co
       <ComposerPrimitive.AttachmentDropzone className="group/drop contents">
       <CourtShader />
       <div className="grain" aria-hidden />
-      <Header />
+      <Header persisted={persisted} />
       <Thread />
-      <Composer imports={imports} />
+      <Composer imports={persisted} />
       <Lane />
-      <Integrations imports={imports} />
+      <Integrations imports={persisted} />
       <HighlightsModal />
       <GameTape />
       <RecordModal />
@@ -157,7 +159,7 @@ function Ball({ size = 26, line = 1.5 }: { size?: number; line?: number }) {
   );
 }
 
-function Header() {
+function Header({ persisted }: { persisted: boolean }) {
   const ref = useRef<HTMLElement>(null);
   // The header wraps to a second row when its items overflow; everything pinned below it reads --header-h.
   useLayoutEffect(() => {
@@ -177,6 +179,7 @@ function Header() {
       </div>
       <SeasonHud />
       <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
+        <RosterControl persisted={persisted} />
         <button onClick={() => game.openModal("sources")} className="glass press flex h-[38px] flex-none items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold whitespace-nowrap">
           Integrations
           <HeaderLive />
@@ -197,7 +200,7 @@ function SeasonHud() {
   const lvl = levelFor(xp);
   const reduce = useReducedMotion();
   return (
-    <div className="glass relative hidden items-center gap-3 rounded-full py-1 pr-4 pl-1 lg:flex">
+    <div aria-label={`Season ${lvl.name}, ${xp} XP, streak ${streak} days, ${assists} assists`} className="glass relative hidden items-center gap-3 rounded-full py-1 pr-4 pl-1 lg:flex">
       <motion.span
         key={lvl.name}
         initial={reduce ? false : { opacity: 0, transform: "scale(0.9)", filter: "blur(4px)" }}

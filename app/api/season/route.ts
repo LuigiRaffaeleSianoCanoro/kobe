@@ -30,6 +30,9 @@ export async function GET() {
 
 export async function POST(req: Request) {
   if (!sql) return Response.json({ error: "No database configured." }, { status: 404 });
+  if (!req.headers.get("content-type")?.startsWith("application/json")) {
+    return Response.json({ error: "Expected application/json." }, { status: 415 });
+  }
   const parsed = SeasonEvent.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "Invalid event." }, { status: 400 });
   const e = parsed.data;

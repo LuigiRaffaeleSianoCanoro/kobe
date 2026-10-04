@@ -1,10 +1,9 @@
 /**
  * Person CRM records for courtside cards and the scouting report.
  *
- * Neon project shy-scene-82014972 (branch production) is the intended database,
- * but only when a connection string is already configured. This app does not
- * invent one. `neonConfigured` is true only when Vite already has a database
- * URL; the UI still must not say Neon is connected until a row is read back.
+ * Records stay in this browser under localStorage key `kobe.crm.v1`.
+ * Neon is not connected. A database URL is never read here: Vite would
+ * inline it into the browser bundle, password and all.
  */
 
 export type Person = {
@@ -22,6 +21,10 @@ export type Person = {
   sample: boolean;
   /** Rapport figure carried on the original demo people. Not computed. */
   score: number | null;
+  /** Scouting-report action from the original demo. Empty on records created here. */
+  action: string;
+  /** Prompt the action button sends. Empty when there is no action. */
+  prompt: string;
 };
 
 export type PersonForm = {
@@ -56,6 +59,8 @@ const SAMPLE_PEOPLE: Person[] = [
     points: ["Moved to Brooklyn in August", "Training for the NYC Half in March", "Favorite spot: Bunna Cafe"],
     sample: true,
     score: 82,
+    action: "Draft birthday message",
+    prompt: "Draft a birthday message for Maya",
   },
   {
     id: "marcus",
@@ -70,6 +75,8 @@ const SAMPLE_PEOPLE: Person[] = [
     points: ["Relocated to Austin in August", "Daughter just started kindergarten", "Thinking about advising early-stage teams"],
     sample: true,
     score: 74,
+    action: "Brief me again",
+    prompt: "Brief me on Marcus",
   },
   {
     id: "jordan",
@@ -84,6 +91,8 @@ const SAMPLE_PEOPLE: Person[] = [
     points: ["Just adopted a dog named Biscuit", "Tore an ACL in June, back on court now", "Hosting the dinner for 6"],
     sample: true,
     score: 88,
+    action: "Fix Thursday conflict",
+    prompt: "Fix my Thursday conflict",
   },
   {
     id: "priya",
@@ -98,6 +107,8 @@ const SAMPLE_PEOPLE: Person[] = [
     points: ["Started as Head of Design at Northwind", "Ran her first marathon last spring", "Prefers voice notes over texts"],
     sample: true,
     score: 61,
+    action: "Draft congrats",
+    prompt: "Draft congrats to Priya",
   },
   {
     id: "dev",
@@ -112,31 +123,20 @@ const SAMPLE_PEOPLE: Person[] = [
     points: ["Asked if you can help him move on the 17th", "Started a new job at a robotics lab", "Rooting hard for the home team this season"],
     sample: true,
     score: 79,
+    action: "Draft reply",
+    prompt: "Draft a reply to Dev",
   },
 ];
 
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
 
-function envDatabaseUrl(): string {
-  const env = import.meta.env;
-  if (!env) return "";
-  const viteUrl = env.VITE_DATABASE_URL;
-  if (typeof viteUrl === "string" && viteUrl.trim()) return viteUrl.trim();
-  return "";
-}
-
-/** True when a database URL was already provided to the client build. */
-export function neonConfigured(): boolean {
-  return envDatabaseUrl().length > 0;
-}
-
-/**
- * Neon is connected only after a record is read back from the project.
- * No credentials are present in this environment, and this module never
- * opens a connection or fabricates a URL, so this stays false.
- */
-export function neonConnected(): boolean {
-  return false;
+/** localStorage access can throw before any method call. Never let that blank the page. */
+export function browserStorage(): Storage | null {
+  try {
+    return globalThis.localStorage;
+  } catch {
+    return null;
+  }
 }
 
 export function cloneSeed(): Person[] {
@@ -174,6 +174,20 @@ export function normalizePerson(value: unknown): Person | null {
     points: asStringList(raw.points),
     sample: raw.sample === true,
     score,
+    action: asString(raw.action),
+    prompt: asString(raw.prompt),
+  };
+}
+
+/** Older saved rows predate action/prompt. Keep the demo buttons for those ids. */
+function withSampleAction(person: Person): Person {
+  if (person.action && person.prompt) return person;
+  const sample = SAMPLE_PEOPLE.find((item) => item.id === person.id);
+  if (!sample) return person;
+  return {
+    ...person,
+    action: person.action || sample.action,
+    prompt: person.prompt || sample.prompt,
   };
 }
 
@@ -183,20 +197,30 @@ export function readPeople(storage: StorageLike | null): Person[] {
     const raw = storage.getItem(STORAGE_KEY);
     if (raw == null) {
       const seeded = cloneSeed();
-      storage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+      try {
+        storage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+      } catch {
+        // The roster still renders from memory when the first write is rejected.
+      }
       return seeded;
     }
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.map(normalizePerson).filter((person): person is Person => person !== null);
+    return parsed.map(normalizePerson).filter((person): person is Person => person !== null).map(withSampleAction);
   } catch {
     return cloneSeed();
   }
 }
 
-export function writePeople(storage: StorageLike | null, people: Person[]): void {
-  if (!storage) return;
-  storage.setItem(STORAGE_KEY, JSON.stringify(people));
+/** False when the write did not happen. Callers must not treat the record as saved. */
+export function writePeople(storage: StorageLike | null, people: Person[]): boolean {
+  if (!storage) return false;
+  try {
+    storage.setItem(STORAGE_KEY, JSON.stringify(people));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function blankPerson(): Person {
@@ -214,6 +238,8 @@ export function blankPerson(): Person {
     points: [],
     sample: false,
     score: null,
+    action: "",
+    prompt: "",
   };
 }
 
@@ -253,6 +279,8 @@ export function fromForm(form: PersonForm, existing?: Person): Person {
     points: lines(form.pointsText),
     sample: existing?.sample ?? false,
     score: existing?.score ?? null,
+    action: existing?.action ?? "",
+    prompt: existing?.prompt ?? "",
   };
 }
 

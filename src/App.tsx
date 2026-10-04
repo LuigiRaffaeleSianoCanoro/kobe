@@ -3,7 +3,7 @@ import { CHIPS, D, INITIAL_SOURCES, PAIR_CODE, VOICE_LINES, type AlertAction, ty
 import { reply, type AgentReply } from "./agent";
 import { Court } from "./Court";
 import { PersonReport } from "./PersonReport";
-import { blankPerson, cardMeta, cardRight, findPerson, fromForm, initials, neonConnected, readPeople, toForm, writePeople, type Person, type PersonForm } from "./crm";
+import { blankPerson, browserStorage, cardMeta, cardRight, cloneSeed, findPerson, fromForm, initials, readPeople, toForm, writePeople, type Person, type PersonForm } from "./crm";
 
 type Message = AgentReply & { id: number; role: "agent" | "user"; sent?: boolean };
 type LiveAlert = FeedItem & { id: number; visible: boolean };
@@ -44,7 +44,14 @@ export default function App() {
   const [sources, setSources] = useState<Record<string, boolean>>({ ...INITIAL_SOURCES });
   const sourcesRef = useRef(sources);
   sourcesRef.current = sources;
-  const [people, setPeople] = useState<Person[]>(() => readPeople(localStorage));
+  const [people, setPeople] = useState<Person[]>(() => {
+    try {
+      return readPeople(browserStorage());
+    } catch {
+      return cloneSeed();
+    }
+  });
+  const [saveError, setSaveError] = useState<string | null>(null);
   const peopleRef = useRef(people);
   peopleRef.current = people;
   const [form, setForm] = useState<PersonForm | null>(null);
@@ -161,9 +168,10 @@ export default function App() {
     }, 1500);
   };
 
-  const persistPeople = (next: Person[]) => {
+  const persistPeople = (next: Person[]): boolean => {
+    if (!writePeople(browserStorage(), next)) return false;
     setPeople(next);
-    writePeople(localStorage, next);
+    return true;
   };
 
   const openRecord = (id: string) => {
@@ -173,6 +181,7 @@ export default function App() {
 
   const startCreate = () => {
     const person = blankPerson();
+    setSaveError(null);
     setForm(toForm(person));
     setRecord(person.id);
     setModal(null);
@@ -182,6 +191,7 @@ export default function App() {
     if (!record) return;
     const saved = findPerson(people, record);
     if (!saved) return;
+    setSaveError(null);
     setForm(toForm(saved));
   };
 
@@ -190,7 +200,11 @@ export default function App() {
     const existing = findPerson(people, form.id);
     const nextPerson = fromForm(form, existing);
     const next = existing ? people.map((person) => (person.id === nextPerson.id ? nextPerson : person)) : [...people, nextPerson];
-    persistPeople(next);
+    if (!persistPeople(next)) {
+      setSaveError("Couldn't save. Browser storage rejected the write, so this record is unchanged.");
+      return;
+    }
+    setSaveError(null);
     setForm(null);
     setRecord(nextPerson.id);
   };
@@ -198,11 +212,13 @@ export default function App() {
   const cancelForm = () => {
     if (!form) return;
     const exists = people.some((person) => person.id === form.id);
+    setSaveError(null);
     setForm(null);
     if (!exists) setRecord(null);
   };
 
   const closeReport = () => {
+    setSaveError(null);
     setForm(null);
     setRecord(null);
   };
@@ -240,7 +256,7 @@ export default function App() {
             KOBE<span style={{ color: "#F2B63A" }}>.AI</span>
           </div>
         </div>
-        <div style={{ display: wide ? "flex" : "none", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 999, background: "rgba(16,12,20,.5)", border: "1px solid rgba(255,255,255,.08)", backdropFilter: "blur(14px)", font: `500 11px ${mono}`, letterSpacing: ".06em", color: "#D9D2C7" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 999, background: "rgba(16,12,20,.5)", border: "1px solid rgba(255,255,255,.08)", backdropFilter: "blur(14px)", font: `500 11px ${mono}`, letterSpacing: ".06em", color: "#D9D2C7" }}>
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3DBE8B", boxShadow: "0 0 10px #3DBE8B", animation: "kpulse 1.8s ease-in-out infinite" }} />
           <span>SCOUTING {connectedCount} SOURCES</span>
         </div>
@@ -253,7 +269,7 @@ export default function App() {
             <span>Integrations</span>
             <span style={{ font: `600 11px ${mono}`, padding: "2px 6px", borderRadius: 6, background: "rgba(242,182,58,.18)", color: "#F2B63A" }}>{connectedCount}</span>
           </button>
-          <button className="hover-cream" onClick={() => setModal("channels")} style={{ display: wide ? "flex" : "none", alignItems: "center", gap: 8, height: 38, padding: "0 16px", borderRadius: 999, background: "#F4F1EC", border: "none", color: "#15110D", fontSize: 13, fontWeight: 700 }}>
+          <button className="hover-cream" onClick={() => setModal("channels")} style={{ display: "flex", alignItems: "center", gap: 8, height: 38, padding: "0 16px", borderRadius: 999, background: "#F4F1EC", border: "none", color: "#15110D", fontSize: 13, fontWeight: 700 }}>
             <span>Add Kobe to…</span>
             {channelCount > 0 && <span style={{ font: `600 11px ${mono}`, padding: "2px 6px", borderRadius: 6, background: "#15110D", color: "#F2B63A" }}>{channelCount}</span>}
           </button>
@@ -426,7 +442,7 @@ export default function App() {
               <div style={{ overflowY: "auto", padding: "20px 22px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                   <div style={{ fontWeight: 800, fontStretch: "68%", fontSize: 36, lineHeight: 1, textTransform: "uppercase" }}>Roster</div>
-                  <div style={{ fontSize: 14, color: "#BDB5AA" }}>{neonConnected() ? "People are read from Neon." : "Each person is a record. Creates and edits stay after a reload. Neon is not connected."}</div>
+                  <div style={{ fontSize: 14, color: "#BDB5AA" }}>Each person is a record in this browser. Creates and edits stay after a reload. Neon is not connected.</div>
                 </div>
                 <button className="gold" aria-label="Add person" onClick={startCreate} style={{ alignSelf: "flex-start", height: 38, padding: "0 16px", borderRadius: 999, background: "#F2B63A", border: "none", color: "#15110D", fontSize: 13.5, fontWeight: 700 }}>Add person</button>
                 <div style={{ display: "flex", flexDirection: "column", borderRadius: 16, overflow: "hidden", border: "1px solid rgba(255,255,255,.08)" }}>
@@ -547,6 +563,7 @@ export default function App() {
           onCancel={cancelForm}
           onClose={closeReport}
           onAsk={(prompt) => { closeReport(); runAgent(prompt); }}
+          saveError={saveError}
         />
       )}
     </>

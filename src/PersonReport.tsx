@@ -41,6 +41,7 @@ export function PersonReport({
   onCancel,
   onClose,
   onAsk,
+  saveError,
 }: {
   saved: Person | null;
   form: PersonForm | null;
@@ -50,6 +51,7 @@ export function PersonReport({
   onCancel: () => void;
   onClose: () => void;
   onAsk: (prompt: string) => void;
+  saveError?: string | null;
 }) {
   const editing = form !== null;
   const person = saved;
@@ -74,6 +76,9 @@ export function PersonReport({
             <Field label="OPEN LOOP" value={form.openLoop} onChange={(openLoop) => onForm({ ...form, openLoop })} multiline />
             <Field label="SOURCES" value={form.sourcesText} onChange={(sourcesText) => onForm({ ...form, sourcesText })} multiline />
             <Field label="TALKING POINTS" value={form.pointsText} onChange={(pointsText) => onForm({ ...form, pointsText })} multiline />
+            {saveError ? (
+              <div role="alert" style={{ fontSize: 13.5, lineHeight: 1.45, color: "#E5484D" }}>{saveError}</div>
+            ) : null}
             <div style={{ display: "flex", gap: 8 }}>
               <button className="gold" aria-label="Save record" onClick={onSave} style={{ flex: 1, height: 42, borderRadius: 999, background: "#F2B63A", border: "none", color: "#15110D", fontSize: 14, fontWeight: 700 }}>Save record</button>
               <button className="ghost" aria-label={creating ? "Discard record" : "Cancel edit"} onClick={onCancel} style={{ height: 42, padding: "0 18px", borderRadius: 999, background: "transparent", border: "1px solid rgba(255,255,255,.16)", color: "#F4F1EC", fontSize: 14 }}>{creating ? "Discard" : "Cancel"}</button>
@@ -121,9 +126,12 @@ export function PersonReport({
                 ))}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="gold" aria-label="Edit record" onClick={onEdit} style={{ flex: 1, height: 42, borderRadius: 999, background: "#F2B63A", border: "none", color: "#15110D", fontSize: 14, fontWeight: 700 }}>Edit record</button>
-              {view.name.trim() ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {view.action && view.prompt ? (
+                <button className="gold" aria-label={view.action} onClick={() => onAsk(view.prompt)} style={{ flex: "1 1 160px", height: 42, borderRadius: 999, background: "#F2B63A", border: "none", color: "#15110D", fontSize: 14, fontWeight: 700 }}>{view.action}</button>
+              ) : null}
+              <button className={view.action && view.prompt ? "ghost" : "gold"} aria-label="Edit record" onClick={onEdit} style={view.action && view.prompt ? { height: 42, padding: "0 16px", borderRadius: 999, background: "transparent", border: "1px solid rgba(255,255,255,.16)", color: "#F4F1EC", fontSize: 14 } : { flex: "1 1 160px", height: 42, borderRadius: 999, background: "#F2B63A", border: "none", color: "#15110D", fontSize: 14, fontWeight: 700 }}>Edit record</button>
+              {view.name.trim() && !/^brief me\b/i.test(view.prompt) ? (
                 <button className="ghost" aria-label="Brief me" onClick={() => onAsk(`Brief me on ${view.name}`)} style={{ height: 42, padding: "0 16px", borderRadius: 999, background: "transparent", border: "1px solid rgba(255,255,255,.16)", color: "#F4F1EC", fontSize: 14 }}>Brief me</button>
               ) : null}
               <button className="ghost" aria-label="Close report" onClick={onClose} style={{ height: 42, padding: "0 18px", borderRadius: 999, background: "transparent", border: "1px solid rgba(255,255,255,.16)", color: "#F4F1EC", fontSize: 14 }}>Close</button>

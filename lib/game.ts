@@ -8,7 +8,7 @@ import type { TouchNote } from "./highlights";
 import { PlanWrite, insertPlanRecord, planIdReuse, plansFromStoredJson, recordSupports, samePlan, withoutPlan, type Plan } from "./plans";
 import type { Season, SeasonEvent } from "./season";
 import { NOTE_MAX, TAPE_STORAGE_KEY, cleanNote, parseStoredCoaching } from "./tape";
-import { dropFailedTouch, newestTouches, recordSavedBody, rememberTouch } from "./touch-log";
+import { newestTouches, recordSavedBody, rememberTouch } from "./touch-log";
 
 export type PlanStorage = "browser" | "postgres" | "session";
 const PLAN_KEY = "kobe.plans.v1";
@@ -95,6 +95,7 @@ const markActive = (s: GameState) => (s.activeToday ? {} : { streak: s.streak + 
 let persisted = false;
 let queue = Promise.resolve();
 let inflight = 0;
+const saving = new Set<string>();
 
 async function request(event?: SeasonEvent): Promise<Season> {
   const res = await fetch(
@@ -342,6 +343,15 @@ export const game = {
     sync();
   },
 
+  upsertPerson(person: Person) {
+    if (persisted && person.id) serverIds.add(person.id);
+    set((s) => ({ people: { ...s.people, [person.id]: person } }));
+  },
+
+  replacePeople(people: Person[]) {
+    set({ people: byId(people) });
+  },
+
   mergePeople(people: Person[]) {
     set((current) => {
       const next = { ...current.people };
@@ -486,9 +496,9 @@ export const game = {
     });
   },
 
-  // Copying a draft does not send it. Rapport moves only after a live send that the database accepts.
+  // Copying a draft does not send it. With a database, "Logged" appears only after /api/season accepts the write.
   recordSent(key: string, { personId, to, channel, body }: SentDraft) {
-    if (state.sent[key]) return;
+    if (state.sent[key] || saving.has(key)) return;
     const before = personId ? state.people[personId] : undefined;
     const addedHere = persisted && !!personId && !serverIds.has(personId);
     const touch = before && body.trim() ? { personId: before.id, channel, body: body.trim(), at: new Date().toISOString() } : null;
@@ -509,56 +519,54 @@ export const game = {
       });
       return;
     }
-    const startsDay = !state.activeToday;
-    set((current) => {
-      const touches = rememberTouch(current.touches, touch);
-      writeStoredTouches(touches);
-      return {
-        sent: { ...current.sent, [key]: true },
-        logged: { ...current.logged, [key]: true },
-        assists: current.assists + 1,
-        ...markActive(current),
-        people: before ? { ...current.people, [before.id]: { ...before, rapport: Math.min(99, before.rapport + 3), last: `${channel} · just now` } } : current.people,
-        touches,
-      };
-    });
-    game.award(ASSIST_XP, "ASSIST");
-    const savedBody = recordSavedBody(persisted, personId, serverIds);
+    const accept = () => {
+      saving.delete(key);
+      if (state.sent[key]) return;
+      set((current) => {
+        const touches = rememberTouch(current.touches, touch);
+        writeStoredTouches(touches);
+        return {
+          sent: { ...current.sent, [key]: true },
+          logged: { ...current.logged, [key]: true },
+          assists: current.assists + 1,
+          ...markActive(current),
+          people: before ? { ...current.people, [before.id]: { ...before, rapport: Math.min(99, before.rapport + 3), last: `${channel} · just now` } } : current.people,
+          touches,
+        };
+      });
+      game.award(ASSIST_XP, "ASSIST");
+      game.pushAlert({
+        at: 0,
+        kind: "SENT",
+        source: channel.toUpperCase(),
+        color: "#3DBE8B",
+        title: `Message sent to ${to}`,
+        body: recordSavedBody(persisted, personId, serverIds),
+        auto: true,
+      });
+      if (personId === "maya" || personId === "dev") game.completePlay(personId);
+    };
     if (!persisted) {
-      game.pushAlert({ at: 0, kind: "SENT", source: channel.toUpperCase(), color: "#3DBE8B", title: `Message sent to ${to}`, body: savedBody, auto: true });
-    } else {
-      sync(
-        { type: "assist", personId, channel, body },
-        () => {
-          set((current) => {
-            const touches = dropFailedTouch(current.touches, touch);
-            writeStoredTouches(touches);
-            return {
-              sent: { ...current.sent, [key]: false },
-              logged: { ...current.logged, [key]: false },
-              xp: current.xp - ASSIST_XP,
-              assists: current.assists - 1,
-              people: before ? { ...current.people, [before.id]: before } : current.people,
-              touches,
-              ...(startsDay ? { streak: current.streak - 1, activeToday: false } : {}),
-            };
-          });
-          game.pushAlert({
-            at: 0,
-            kind: "NOT SAVED",
-            source: "SEASON",
-            color: "#E5484D",
-            title: `Couldn't update ${to}'s record`,
-            body: "The send stood. Their record was not updated.",
-            auto: true,
-          });
-        },
-        () => {
-          game.pushAlert({ at: 0, kind: "SENT", source: channel.toUpperCase(), color: "#3DBE8B", title: `Message sent to ${to}`, body: savedBody, auto: true });
-        },
-      );
+      accept();
+      return;
     }
-    if (personId === "maya" || personId === "dev") game.completePlay(personId);
+    saving.add(key);
+    sync(
+      { type: "assist", personId, channel, body },
+      () => {
+        saving.delete(key);
+        game.pushAlert({
+          at: 0,
+          kind: "NOT SAVED",
+          source: "SEASON",
+          color: "#E5484D",
+          title: `Couldn't update ${to}'s record`,
+          body: "The send stood. Their record was not updated.",
+          auto: true,
+        });
+      },
+      accept,
+    );
   },
 
   // Kept for callers that still log a copied draft. A database rejection never says the record was updated.

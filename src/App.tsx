@@ -1,4 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { GamePlan, SeasonHud } from "@/components/season-panel";
+import { isDraftChannel, SEED_ROSTER } from "@/lib/data";
+import { game } from "@/lib/game";
 import { CHIPS, D, INITIAL_SOURCES, PAIR_CODE, VOICE_LINES, type AlertAction, type FeedItem } from "./data";
 import { reply, type AgentReply } from "./agent";
 import { Court } from "./Court";
@@ -57,7 +60,7 @@ function Diamond() {
   return <span style={{ flex: "none", width: 6, height: 6, marginTop: 7, background: "#F2B63A", transform: "rotate(45deg)" }} />;
 }
 
-export default function App() {
+export default function App({ persisted = false }: { persisted?: boolean }) {
   const scrollRef = useRef<HTMLElement>(null);
   const headerRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLInputElement>(null);
@@ -142,6 +145,14 @@ export default function App() {
   };
 
   useEffect(() => {
+    game.load(SEED_ROSTER, persisted);
+  }, [persisted]);
+
+  useEffect(() => {
+    if (messages.some((message) => message.brief?.id === "marcus")) game.completePlay("marcus");
+  }, [messages]);
+
+  useEffect(() => {
     const onResize = () => setVw(window.innerWidth);
     window.addEventListener("resize", onResize);
     const k = 1;
@@ -220,9 +231,9 @@ export default function App() {
   const sendDraft = (mid: number) => {
     const m = messages.find((x) => x.id === mid);
     setMessages((s) => s.map((x) => (x.id === mid ? { ...x, sent: true } : x)));
-    if (m?.draft) {
-      pushAlert({ at: 0, kind: "SENT", source: m.draft.channel.toUpperCase(), color: "#3DBE8B", title: `Message sent to ${m.draft.to}`, body: "Logged to their record. Rapport +3.", auto: true });
-    }
+    if (!m?.draft || !isDraftChannel(m.draft.channel)) return;
+    const person = peopleRef.current.find((entry) => entry.name === m.draft!.to);
+    game.logDraft(String(mid), { personId: person?.id, to: m.draft.to, channel: m.draft.channel, body: m.draft.body, copied: false });
   };
 
   const toggleSource = (id: string, name: string) => {
@@ -353,6 +364,7 @@ export default function App() {
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3DBE8B", boxShadow: "0 0 10px #3DBE8B", animation: "kpulse 1.8s ease-in-out infinite" }} />
           <span>SCOUTING {connectedCount} SOURCES</span>
         </div>
+        {vw >= 1024 && <SeasonHud />}
         <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 8, maxWidth: "100%", minWidth: "min-content", flex: "0 1 auto" }}>
           <button className="hover-int" aria-label="Roster" onClick={() => setModal("roster")} style={{ display: "flex", alignItems: "center", gap: 8, flex: "none", height: 38, padding: "0 14px", borderRadius: 999, background: "rgba(16,12,20,.6)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,.1)", color: "#F4F1EC", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
             <span>Roster</span>
@@ -401,13 +413,13 @@ export default function App() {
                           const meta = card.metaField === "role" && person.sources[0] ? [role, person.sources[0]].filter((part) => part.length > 0).join(" · ") : role;
                           const right = cardRight(person, card.rightField);
                           return (
-                            <button key={card.id} className="rowbtn" aria-label={`Open ${person.name || "record"}`} onClick={() => openRecord(person.id)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", background: "transparent", border: "none", borderBottom: "1px solid rgba(255,255,255,.06)", color: "#F4F1EC", textAlign: "left" }}>
+                            <button key={card.id} className="rowbtn" aria-label={`Open ${person.name || "record"}`} onClick={() => openRecord(person.id)} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, padding: "12px 16px", background: "transparent", border: "none", borderBottom: "1px solid rgba(255,255,255,.06)", color: "#F4F1EC", textAlign: "left" }}>
                               <div style={{ width: 34, height: 34, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(242,182,58,.14)", color: "#F2B63A", fontWeight: 800, fontStretch: "75%", fontSize: 14 }}>{initials(person.name)}</div>
-                              <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 }}>
+                              <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: "1 1 140px", minWidth: 0 }}>
                                 <span style={{ fontSize: 14.5, fontWeight: 600 }}>{person.name}</span>
                                 <span style={{ fontSize: 12.5, color: "#BDB5AA" }}>{meta}</span>
                               </div>
-                              <span style={{ font: `500 11px ${mono}`, color: "#F2B63A", letterSpacing: ".04em" }}>{right}</span>
+                              <span style={{ flex: "none", marginLeft: "auto", textAlign: "right", font: `500 11px ${mono}`, color: "#F2B63A", letterSpacing: ".04em" }}>{right}</span>
                             </button>
                           );
                         })}
@@ -496,6 +508,7 @@ export default function App() {
       </div>
 
       <aside style={{ position: "fixed", top: lane.laneTop, bottom: lane.laneBottom, right: lane.laneRight, width: lane.laneW, display: "flex", flexDirection: "column", gap: 10, zIndex: 30, pointerEvents: "none", overflowY: "auto", padding: "4px 0 20px", boxSizing: "border-box", maskImage: lane.laneMask, WebkitMaskImage: lane.laneMask }}>
+        <GamePlan wide={wide} onAsk={runAgent} />
         {visibleCount > 1 && (
           <button onClick={() => setAlerts((st) => st.map((a) => ({ ...a, visible: false })))} style={{ pointerEvents: "auto", alignSelf: "flex-end", height: 26, padding: "0 10px", borderRadius: 999, background: "rgba(16,12,20,.6)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,.1)", color: "#D3CBC0", font: `500 10.5px ${mono}`, letterSpacing: ".08em" }}>CLEAR {visibleCount}</button>
         )}

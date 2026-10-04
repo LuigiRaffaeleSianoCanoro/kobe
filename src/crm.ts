@@ -1,9 +1,9 @@
 /**
  * Person CRM records for courtside cards and the scouting report.
  *
- * Records stay in this browser under localStorage key `kobe.crm.v1`.
- * Neon is not connected. A database URL is never read here: Vite would
- * inline it into the browser bundle, password and all.
+ * Without a database, records stay in this browser under localStorage key `kobe.crm.v1`.
+ * This module never reads a database URL. When Postgres is configured, the roster screen
+ * writes through /api/people instead, so the agent and the season log see the same person.
  */
 
 export type Person = {

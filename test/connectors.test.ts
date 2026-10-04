@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import test from "node:test";
 import { RequestContext } from "@mastra/core/request-context";
+import type { ToolExecutionContext } from "@mastra/core/tools";
+import { test } from "vitest";
 import {
   USER_TEXT,
   SendConfirm,
@@ -18,7 +19,7 @@ import {
   toolsForConnectedConnectors,
   type GmailClient,
   type SlackClient,
-} from "./connectors.ts";
+} from "../lib/connectors";
 
 const blocked = ["notion", "linear", "drive", "google-drive", "google_drive", "apify", "luma"];
 
@@ -197,10 +198,10 @@ test("Gmail and Slack drafts do not send until the user confirms", async () => {
   const tools = createConnectorTools({ gmail, slack, mailbox });
   assert.deepEqual(Object.keys(tools), ["gmail_search", "gmail_draft", "gmail_send", "slack_search", "slack_draft", "slack_send"]);
 
-  const contextFor = (text: string) => {
+  const contextFor = (text: string): ToolExecutionContext => {
     const requestContext = new RequestContext();
     requestContext.setRaw(USER_TEXT, text);
-    return { requestContext };
+    return { requestContext } as ToolExecutionContext;
   };
   const gmailDraft = await tools.gmail_draft!.execute!({ to: "maya@example.com", subject: "Hi", body: "Hello" }, contextFor("Draft an email to Maya"));
   assert.equal(gmailDraft.ok, true);
@@ -256,15 +257,19 @@ test("the confirm endpoint ignores anything except confirm: true", async () => {
   assert.equal(calls, 1);
 });
 
-test("the scripted matcher and the composer send button stay put", () => {
-  const matcher = readFileSync(new URL("./agent.ts", import.meta.url), "utf8");
+test("the scripted matcher, push-to-talk, and the composer send button stay put", () => {
+  const matcher = readFileSync(new URL("../lib/agent.ts", import.meta.url), "utf8");
   assert.match(matcher, /function reply\(input: string\)/);
   assert.match(matcher, /This offline demo only knows the sample roster/);
   const app = readFileSync(new URL("../components/kobe-app.tsx", import.meta.url), "utf8");
+  assert.match(app, /useChatRuntime\(\{ transport, adapters \}\)/);
+  assert.match(app, /useLocalRuntime\(kobeAdapter, \{ adapters \}\)/);
+  assert.match(app, /<ComposerPrimitive\.Dictate asChild>/);
   assert.match(app, /<ComposerPrimitive\.Send asChild>/);
   assert.match(app, /title="Send"/);
   assert.match(app, /<Ball size=\{46\} line=\{2\} \/>/);
-  const agent = readFileSync(new URL("./kobe-agent.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(app, /SOON|coming soon|OFFLINE DEMO|DEMO · SAMPLE DATA/);
+  const agent = readFileSync(new URL("../lib/kobe-agent.ts", import.meta.url), "utf8");
   assert.match(agent, /createConnectorTools/);
   assert.match(agent, /connectorInstructions/);
 });

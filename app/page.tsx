@@ -13,13 +13,5 @@ export default async function Page() {
   const api = access().mode !== "locked";
   const live = api && !!process.env.NEON_AI_GATEWAY_TOKEN && !!process.env.NEON_AI_GATEWAY_BASE_URL;
   const connectors = api ? await connectorFlags() : { gmail: false, slack: false };
-  return (
-    <KobeApp
-      live={live}
-      persisted={api && !!sql}
-      roster={api ? await loadRoster() : SEED_ROSTER}
-      model={process.env.KOBE_MODEL ?? "neon/gpt-oss-120b"}
-      connectors={connectors}
-    />
-  );
+  return <KobeApp live={live} persisted={api && !!sql} roster={api ? await loadRoster() : SEED_ROSTER} connectors={connectors} />;
 }

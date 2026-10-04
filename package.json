@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:vite": "vite",
     "build": "next build",
     "start": "next start",
-    "test": "vitest run",
+    "test": "vitest run && node --experimental-strip-types --test src/agent.test.ts lib/access.test.ts server/server-env.test.ts",
     "import:whatsapp": "tsx --env-file-if-exists=.env.local scripts/import-whatsapp.ts"
   },
   "dependencies": {
@@ -14,6 +15,7 @@
     "@assistant-ui/react-ai-sdk": "^1.4.14",
     "@mastra/ai-sdk": "^1.10.6",
     "@mastra/core": "^1.74.0",
+    "@neon/ai-sdk-provider": "^1.0.0",
     "@paper-design/shaders-react": "^0.0.81",
     "ai": "^7.0.127",
     "clsx": "^2.1.1",
@@ -31,9 +33,11 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.1.1",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
     "typescript": "^5",
+    "vite": "^8.3.2",
     "vitest": "^5.0.3"
   },
   "packageManager": "pnpm@10.18.1"

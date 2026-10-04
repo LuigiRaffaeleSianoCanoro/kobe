@@ -47,6 +47,8 @@ GMAIL_ACCESS_TOKEN=""
 SLACK_USER_TOKEN=""
 ```
 
+`pnpm dev` is the Next app. Its chat stays on `/api/chat`. `pnpm dev:vite` is the Vite court. It reads the gateway token, base URL, model, and `KOBE_PASSWORD` from that same `.env.local` inside the Node process. The browser bundle does not receive the token.
+
 Then load the schema. It is safe to re-run after pulling changes:
 
 ```bash

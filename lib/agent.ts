@@ -6,8 +6,10 @@ type Reply = { text: string; tool?: ToolCall };
 
 const person = (id: RecordId, meta: string, right: string) => ({ id, meta, right });
 
-function reply(input: string): Reply {
+export function scriptedReply(input: string): Reply {
   const t = input.toLowerCase();
+  if (/\b(mixtapes?|highlights?)\b/.test(t) || /what happened/.test(t) || /week in review/.test(t))
+    return { text: "Here's this week's mixtape. Every line is already on a stored record.", tool: { toolName: "weekly_highlights", args: {} } };
   if (/maya/.test(t) && /(draft|message|write|birthday)/.test(t))
     return {
       text: "Kept it warm and specific. She posted from a Brooklyn run club last week.",
@@ -68,7 +70,7 @@ function lastUserText(messages: readonly ThreadMessage[]) {
 // Offline stand-in for /api/chat: streams scripted text, then a tool call whose result renders as a card.
 export const kobeAdapter: ChatModelAdapter = {
   async *run({ messages, abortSignal }) {
-    const r = reply(lastUserText(messages));
+    const r = scriptedReply(lastUserText(messages));
     await sleep(650, abortSignal);
 
     const words = r.text.split(" ");

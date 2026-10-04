@@ -10,16 +10,17 @@ Built for the Build Personal Agents Hack. MIT licensed, every dependency is open
 - **Live agent (optional).** With Neon AI Gateway credentials, `/api/chat` runs a [Mastra](https://mastra.ai) agent over your roster. Without them, a scripted offline agent answers a few questions with the same cards.
 - **Message drafts you send yourself.** Kobe cannot send messages. "Copy for Instagram" copies the draft to your clipboard and logs the touch on that person's record. With Postgres, the draft text is stored with it.
 - **Season mode.** XP, levels (Rookie → Mamba), a streak of consecutive active days, assists for every draft you log, and a three-play game plan per day.
+- **Weekly highlights.** A mixtape of what this week already has on the people stored in the app: dated fields, talking points, open loops, and drafts you logged. The sample calendar can add an entry it already has. Integrations stay unconnected.
 - **Scouting reports** per person with a rapport score that rises as you keep in touch.
 - **Postgres (optional).** The roster and season stats persist in Postgres. Without a database they live in memory for the session.
 
 ## What is sample data
 
-The scouting feed, the calendar, and the five people in the seed roster are a scripted demo. The feed is a fixed list of alerts in `lib/data.ts` that appear on a timer after the page loads. The calendar is a constant in `lib/roster.ts`. The Integrations and "Add Kobe to…" panels list planned sources and channels; none of them are connected.
+The scouting feed, the calendar, and the five people in the seed roster are a scripted demo. The feed is a fixed list of alerts in `lib/data.ts` that appear on a timer after the page loads. The calendar is a constant in `lib/data.ts`. The weekly mixtape reads that roster, the notes on each record, drafts you have logged, and that sample calendar. The Integrations and "Add Kobe to…" panels list planned sources and channels; none of them are connected.
 
 ## The agent
 
-Kobe is a Mastra agent (`lib/kobe-agent.ts`) served from `/api/chat` and streamed into assistant-ui as an AI SDK v7 UI message stream. It reasons over the roster (from Postgres, or the seed when there is no database) and the sample calendar, and answers by calling one of four tools: `show_people`, `pregame_brief`, `draft_message`, `resolve_conflict`. The page and the agent read the same roster, so the cards show the same people the agent sees.
+Kobe is a Mastra agent (`lib/kobe-agent.ts`) served from `/api/chat` and streamed into assistant-ui as an AI SDK v7 UI message stream. It reasons over the roster (from Postgres, or the seed when there is no database) and the sample calendar, and answers by calling one of five tools: `show_people`, `pregame_brief`, `draft_message`, `resolve_conflict`, `weekly_highlights`. The page and the agent read the same roster, so the cards show the same people the agent sees.
 
 There is no agent memory. The browser sends the whole thread with each message.
 

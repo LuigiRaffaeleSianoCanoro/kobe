@@ -1,15 +1,8 @@
 import { SEED_ROSTER, type Person } from "./data";
 import { sql } from "./db";
+import type { TouchNote } from "./highlights";
 
-// Sample calendar for the demo. No calendar integration reads or replaces it yet.
-export const SAMPLE_CALENDAR = [
-  { when: "Today 3:30 PM", title: "Coffee with Marcus Reid", source: "GOOGLE CALENDAR", where: "Blue Bottle", person: "marcus" },
-  { when: "Thu 7:00 PM", title: "Dinner with Jordan Blake", source: "PARTIFUL", where: "Nopa", person: "jordan" },
-  { when: "Thu 7:00 PM", title: "Product sync", source: "GOOGLE CALENDAR", where: "Zoom" },
-  { when: "Thu 5:30 PM", title: "(free slot)", source: "GOOGLE CALENDAR", where: "" },
-  { when: "Oct 17 morning", title: "(free)", source: "GOOGLE CALENDAR", where: "" },
-  { when: "Oct 18 7:00 PM", title: "Family dinner", source: "GOOGLE CALENDAR", where: "Mom's place", person: "dev" },
-];
+export { SAMPLE_CALENDAR } from "./data";
 
 // The page and /api/chat both read the roster here, so the agent and the cards see the same people.
 // The seed covers a missing, unreachable or empty database, so the roster is never empty.
@@ -27,4 +20,26 @@ export async function loadRoster(): Promise<Person[]> {
     console.error("[kobe] Could not read people. Using the sample roster.", error);
   }
   return SEED_ROSTER;
+}
+
+// Drafts the user copied are the only notes stored besides the record itself.
+export async function loadTouches(): Promise<TouchNote[]> {
+  if (!sql) return [];
+  try {
+    const rows = await sql<{ person_id: string | null; channel: string | null; body: string | null; created_at: Date | string }[]>`
+      select person_id, channel, coalesce(body, '') as body, created_at
+      from touches
+      where created_at >= now() - interval '14 days'
+      order by created_at asc
+      limit 100`;
+    return rows.flatMap((row) => {
+      if (!row.person_id) return [];
+      const at = row.created_at instanceof Date ? row.created_at : new Date(row.created_at);
+      if (Number.isNaN(at.getTime())) return [];
+      return [{ personId: row.person_id, channel: row.channel ?? "", body: row.body ?? "", at: at.toISOString() }];
+    });
+  } catch (error) {
+    console.error("[kobe] Could not read logged drafts. The mixtape will use the records only.", error);
+    return [];
+  }
 }

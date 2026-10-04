@@ -13,9 +13,11 @@ import { Dithering } from "@paper-design/shaders-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
-import { CHANNELS, ENGINE, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
+import { CHANNELS, ENGINE, PLAYS, RECORDS, SAMPLE_CALENDAR, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
 import { game, registerAsk, useGame } from "@/lib/game";
+import { weeklyMixtape, type TouchNote } from "@/lib/highlights";
 import { CourtShader } from "./court-shader";
+import { HighlightsCard, MixtapeView } from "./mixtape";
 import { BriefCard, ConflictCard, DraftCard, PeopleCard } from "./tool-cards";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
@@ -24,14 +26,14 @@ const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any confl
 // Live: Mastra agent on the Neon AI Gateway via /api/chat. Offline: scripted local agent.
 const transport = new AssistantChatTransport({ api: "/api/chat" });
 
-type Wiring = { roster: Person[]; persisted: boolean };
+type Wiring = { roster: Person[]; touches: TouchNote[]; persisted: boolean };
 
-function useWire(runtime: AssistantRuntime, { roster, persisted }: Wiring) {
+function useWire(runtime: AssistantRuntime, { roster, touches, persisted }: Wiring) {
   useEffect(() => {
     registerAsk((text) => runtime.thread.append({ role: "user", content: [{ type: "text", text }] }));
-    game.load(roster, persisted);
+    game.load(roster, persisted, touches);
     return game.startFeed();
-  }, [runtime, roster, persisted]);
+  }, [runtime, roster, touches, persisted]);
 }
 
 function LiveKobe({ model, ...wiring }: Wiring & { model: string }) {
@@ -61,6 +63,7 @@ function Court({ runtime, engine }: { runtime: AssistantRuntime; engine: string 
       <Composer />
       <Lane />
       <Integrations />
+      <HighlightsModal />
       <RecordModal />
     </AssistantRuntimeProvider>
   );
@@ -253,6 +256,9 @@ function Hero() {
         Never miss a birthday, double-book a night, or walk into a conversation cold. This demo runs on a sample roster, feed and calendar. Inbox and social integrations are not connected yet.
       </p>
       <div className="mt-1.5 flex flex-wrap gap-2">
+        <button type="button" onClick={() => game.openModal("highlights")} className="glass chip press h-[34px] rounded-full px-3.5 text-[13px]">
+          This week's mixtape
+        </button>
         {CHIPS.map((c, i) => (
           <motion.div
             key={c}
@@ -321,6 +327,7 @@ function AssistantMessage() {
                   pregame_brief: BriefCard,
                   draft_message: DraftCard,
                   resolve_conflict: ConflictCard,
+                  weekly_highlights: HighlightsCard,
                 },
               },
             }}
@@ -398,6 +405,10 @@ function Lane() {
   return (
     <aside className="pointer-events-none fixed top-[calc(var(--header-h)+16px)] right-4 left-4 z-30 flex flex-col gap-2.5 min-[1000px]:top-[calc(var(--header-h)+8px)] min-[1000px]:right-5 min-[1000px]:bottom-[104px] min-[1000px]:left-auto min-[1000px]:w-[340px] min-[1000px]:overflow-y-auto min-[1000px]:pb-5">
       <GamePlan />
+      <button type="button" onClick={() => game.openModal("highlights")} className="glass press pointer-events-auto flex items-center gap-3 rounded-[18px] px-4 py-2.5 text-left">
+        <span className="label text-gold">HIGHLIGHTS</span>
+        <span className="min-w-0 flex-1 text-[13.5px] font-semibold">Weekly mixtape</span>
+      </button>
       {visible.length > 1 && (
         <button onClick={game.clearAlerts} className="glass label press pointer-events-auto hidden h-[26px] self-end rounded-full px-2.5 text-chalk-2 min-[1000px]:block">
           CLEAR {visible.length}
@@ -562,12 +573,39 @@ function Soon() {
   return <span className="label flex-none rounded-md bg-white/[.07] px-1.5 py-0.5 text-[10px] text-chalk-3">SOON</span>;
 }
 
+function HighlightsModal() {
+  const open = useGame((s) => s.modal === "highlights");
+  const people = useGame((s) => s.people);
+  const touches = useGame((s) => s.touches);
+  const tape = useMemo(() => weeklyMixtape(Object.values(people), SAMPLE_CALENDAR, new Date(), touches), [people, touches, open]);
+  const close = () => game.openModal(null);
+  return (
+    <Modal open={open} onClose={close} width={560}>
+      <div className="flex items-center px-5 pt-4">
+        <button type="button" onClick={close} aria-label="Close" className="press ml-auto grid h-[34px] w-[34px] place-items-center rounded-full bg-white/[.06] text-lg">
+          ×
+        </button>
+      </div>
+      <div className="overflow-y-auto px-5 pt-1 pb-6">
+        <MixtapeView
+          tape={tape}
+          onOpen={(id) => {
+            close();
+            game.openRecord(id);
+          }}
+        />
+      </div>
+    </Modal>
+  );
+}
+
 function Integrations() {
   const modal = useGame((s) => s.modal);
   const close = () => game.openModal(null);
+  const open = modal === "sources" || modal === "channels";
   const tab = modal === "channels" ? "channels" : "sources";
   return (
-    <Modal open={!!modal} onClose={close} width={860}>
+    <Modal open={open} onClose={close} width={860}>
       <div className="flex items-center gap-4 px-5.5 pt-5">
         <div className="flex gap-1 rounded-full bg-white/[.06] p-1">
           {(["sources", "channels"] as const).map((t) => (

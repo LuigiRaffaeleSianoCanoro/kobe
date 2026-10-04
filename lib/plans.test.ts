@@ -137,18 +137,36 @@ test("watching for a reply is refused instead of becoming a weekly check-in", ()
     "Remind me when Maya writes back",
     "Remind me if Dev answers",
     "Remind me to message Maya when she replies",
+    "Remind me if Maya sends me a text",
+    "Remind me once Dev replies",
+    "Remind me after Dev replies",
+    "Remind me whenever Dev replies",
+    "Remind me as soon as Dev answers",
+    "Remind me when I hear from Dev",
+    "Remind me if Dev doesn't reply",
+    "Once Dev replies",
+    "After Dev replies",
+    "Whenever Dev replies",
+    "as soon as Dev answers",
+    "when I hear from Dev",
+    "if Dev doesn't reply",
   ]) {
     const intent = interpretPlan(line, roster);
     assert.equal(intent.type, "say", line);
     if (intent.type !== "say") continue;
     assert.match(intent.text, /No accounts are connected/);
     assert.equal("plan" in intent, false);
+    const reply = offlinePlanReply(line, roster);
+    assert.equal(reply?.args, undefined, line);
   }
   const birthday = interpretPlan("Remind me before Maya's birthday", roster);
   assert.equal(birthday.type, "plan");
   const sunday = interpretPlan("Every Sunday, check in with Dev", roster);
   assert.equal(sunday.type, "plan");
   if (sunday.type === "plan") assert.equal(sunday.plan.condition, "weekly");
+  const replyToDev = interpretPlan("Remind me to reply to Dev", roster);
+  assert.equal(replyToDev.type, "plan");
+  if (replyToDev.type === "plan") assert.equal(replyToDev.plan.personId, "dev");
 });
 
 test("a second tab's plan is kept when this tab saves another", () => {

@@ -123,11 +123,11 @@ export default function App() {
     setInput("");
     setTyping(true);
     setMessages((s) => [...s, { id, role: "user", text }]);
-    later(() => {
-      const r = reply(text, sourcesRef.current, peopleRef.current, personId);
+    // The model runs on the server. A new draft stays unsent until Send.
+    void reply(text, sourcesRef.current, peopleRef.current, personId).then((r) => {
       setTyping(false);
-      setMessages((s) => [...s, { id: id + 1, role: "agent", ...r }]);
-    }, 900 + Math.random() * 600);
+      setMessages((s) => [...s, { id: id + 1, role: "agent", ...r, sent: false }]);
+    });
   };
 
   const act = (a: LiveAlert, action?: AlertAction) => {

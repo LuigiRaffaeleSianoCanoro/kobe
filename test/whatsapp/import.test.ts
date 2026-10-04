@@ -69,6 +69,17 @@ describe.skipIf(!url)("importWhatsAppExport against Postgres", { timeout: REMOTE
     expect(count).toBe(6);
   });
 
+  it("imports the same new contact once when two uploads arrive together", async () => {
+    const name = `Valentina Ríos ${uniqueSuffix()}`;
+
+    const reports = await Promise.all([importWhatsAppExport(db, iosSpanish(name)), importWhatsAppExport(db, iosSpanish(name))]);
+
+    expect(reports.map((r) => r.people[0].created).sort()).toEqual([false, true]);
+    expect(reports.map((r) => r.stored).sort()).toEqual([0, 6]);
+    const [{ people }] = await db`select count(*)::int as people from people where name = ${name}`;
+    expect(people).toBe(1);
+  });
+
   it("reports what it stored, for whom and over which dates, creating an unknown contact for review", async () => {
     const name = `Valentina Ríos ${uniqueSuffix()}`;
 

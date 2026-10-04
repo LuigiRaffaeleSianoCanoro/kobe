@@ -5,6 +5,19 @@ import { readExportFile } from "../../lib/whatsapp/export-file";
 import { ImportError } from "../../lib/whatsapp/parse";
 
 const chatText = readFileSync(new URL("../fixtures/whatsapp/ios-es/_chat.txt", import.meta.url), "utf8");
+const MB = 1024 * 1024;
+
+// Rewrites the uncompressed size each central directory entry declares, as a crafted .zip would.
+function declareSizes(zip: Uint8Array, sizes: number[]): Uint8Array {
+  const out = zip.slice();
+  const view = new DataView(out.buffer);
+  let entry = 0;
+  for (let at = 0; at + 4 <= out.length && entry < sizes.length; at++) {
+    if (view.getUint32(at, true) !== 0x02014b50) continue;
+    view.setUint32(at + 24, sizes[entry++], true);
+  }
+  return out;
+}
 
 describe("readExportFile", () => {
   it("reads _chat.txt out of an iPhone .zip and takes the chat name from the file name", () => {
@@ -37,6 +50,26 @@ describe("readExportFile", () => {
     const bytes = fileName.endsWith(".zip") ? zipSync({ "_chat.txt": strToU8("hola") }) : strToU8("hola");
 
     expect(readExportFile(fileName, bytes).chatName).toBe(chatName);
+  });
+
+  it("refuses a .zip whose chat text unpacks past 50 MB, without inflating it", () => {
+    const bomb = zipSync({ "_chat.txt": new Uint8Array(50 * MB + 1).fill(0x61) }, { level: 9 });
+    expect(bomb.length).toBeLessThan(MB);
+
+    expect(() => readExportFile("WhatsApp Chat - Sam Carter.zip", bomb)).toThrow(ImportError);
+    expect(() => readExportFile("WhatsApp Chat - Sam Carter.zip", bomb)).toThrow(/unpacks to more than 50 MB/);
+  });
+
+  it("adds up every chat text in the .zip against the 50 MB cap", () => {
+    const zip = declareSizes(zipSync({ "a.txt": strToU8("hola"), "b.txt": strToU8("chau") }), [30 * MB, 30 * MB]);
+
+    expect(() => readExportFile("export.zip", zip)).toThrow(/unpacks to more than 50 MB/);
+  });
+
+  it("never unpacks more than a .zip declares, even when its data is longer", () => {
+    const zip = declareSizes(zipSync({ "_chat.txt": strToU8(chatText.repeat(50)) }), [16]);
+
+    expect(readExportFile("WhatsApp Chat - Sam Carter.zip", zip).text.length).toBeLessThanOrEqual(16);
   });
 
   it.each([

@@ -82,6 +82,8 @@ export async function importWhatsAppExport(
   const lastAt = new Date(times.reduce((a, b) => Math.max(a, b)));
 
   return db.begin(async (tx) => {
+    // One import at a time, across tabs and requests: two uploads of the same new contact must not both create them.
+    await tx`select pg_advisory_xact_lock(hashtext('kobe.whatsapp-import'))`;
     const people = await tx<PersonRow[]>`select id, name from people`;
     const personNamed = (name: string) => {
       const match = findByFullOrUniqueFirstName(people.map((p) => p.name), name);

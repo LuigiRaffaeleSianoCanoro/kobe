@@ -16,12 +16,17 @@ const MAX_MESSAGES = 30;
 
 const MODEL_ERROR = "Kobe couldn't reach the model. Check the Neon AI Gateway credentials.";
 
-// The page posts a card after each WhatsApp import. The model reads the card's one-line summary instead.
-function withImportSummaries(message: UIMessage): UIMessage {
-  const parts = message.parts.map((part) =>
-    part.type === "data-whatsapp-import" ? { type: "text" as const, text: String((part.data as { summary?: unknown }).summary ?? "") } : part,
-  );
-  return { ...message, parts };
+// The page posts a card after each WhatsApp import. The model reads the card's one-line summary instead;
+// a card without one is dropped rather than sent as an empty turn.
+function withImportSummaries(messages: UIMessage[]): UIMessage[] {
+  return messages.flatMap((message) => {
+    const parts = message.parts.flatMap((part) => {
+      if (part.type !== "data-whatsapp-import") return [part];
+      const summary = (part.data as { summary?: unknown } | null)?.summary;
+      return typeof summary === "string" && summary.trim() ? [{ type: "text" as const, text: summary }] : [];
+    });
+    return parts.length ? [{ ...message, parts }] : [];
+  });
 }
 
 export async function POST(req: Request) {
@@ -34,10 +39,7 @@ export async function POST(req: Request) {
   const parsed = await safeValidateUIMessages({ messages: body.messages });
   if (!parsed.success) return new Response("Invalid messages.", { status: 400 });
   // Instructions come from the server only. Coaching is a separate field, checked against the roster.
-  const messages = parsed.data
-    .filter((m) => m.role !== "system")
-    .slice(-MAX_MESSAGES)
-    .map(withImportSummaries);
+  const messages = withImportSummaries(parsed.data.filter((m) => m.role !== "system").slice(-MAX_MESSAGES));
   const fromClient = CoachingList.safeParse(body.coaching).data ?? [];
   const roster = await loadRoster();
   const saved = ((await readCoaching()) ?? []).map(({ personId, note }) => ({ personId, note }));

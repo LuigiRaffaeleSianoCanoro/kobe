@@ -59,6 +59,16 @@ describe("uploads behind the KOBE_PASSWORD rule", () => {
 });
 
 describe("POST /api/imports/whatsapp without a database", () => {
+  it("refuses an upload over 50 MB before reading it", async () => {
+    const { POST } = await routeWithDatabase("");
+    const oversized = new Request(ENDPOINT, { method: "POST", headers: { "content-length": String(60 * 1024 * 1024) }, body: "x" });
+
+    const res = await POST(oversized);
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: expect.stringMatching(/larger than 50 MB/) });
+  });
+
   it("explains that importing needs a database", async () => {
     const { POST, sql } = await routeWithDatabase("");
 

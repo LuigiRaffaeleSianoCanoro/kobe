@@ -3,6 +3,7 @@ import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { connectorInstructions, connectorMailbox, createConnectorTools, liveConnectors, type LiveConnectors, type Mailbox } from "./connectors";
 import { DRAFT_CHANNELS, type Person } from "./data";
+import { conditionFits, mentionsConnectedAccount, planDetail, recordSupports, PLAN_CONDITIONS } from "./plans";
 import { SAMPLE_CALENDAR, loadRoster } from "./roster";
 
 // Any model in the Neon AI Gateway catalog works. The default is open-weight, so the same
@@ -20,7 +21,9 @@ Style: one or two short sentences, warm and direct, with a light basketball flav
 - pregame_brief: before meeting someone, or when asked about a specific person.
 - draft_message: when asked to write, reply, congratulate or wish someone well. Write the body in the user's own voice, specific to that person's details, under 280 characters. Pick the channel they last used.
 - resolve_conflict: when two calendar events overlap. Propose a fix and include a draft to the person affected.
-The draft_message card is something the user copies and sends. Never say that card was sent. After a tool returns, do not repeat what the card shows.
+- set_plan: the user wants a trigger, routine, reminder, or game-plan item kept on someone already on the roster. kind is "trigger" or "routine". A trigger condition is birthday, last_touch, next_up, or open_loop, and it must already be on that person's record. A routine condition is daily or weekly. The label names the plan. The prompt is the short ask Kobe should run later, such as "Brief me on Marcus".
+The draft_message card is something the user copies. Never say that card was sent. The set_plan card does not save until the user confirms. After a tool returns, do not repeat what the card shows.
+If they ask you to watch an inbox, social network, calendar account, or any integration that is not connected, call no tool. Never invent a person or a connected account.
 ${connectorInstructions(flags)}
 
 ROSTER:
@@ -81,6 +84,26 @@ export async function buildKobeAgent(options?: { connectors?: LiveConnectors; ma
     execute: async ({ recordId }) => ({ to: roster.find((r) => r.id === recordId)!.name, status: "awaiting user" }),
   });
 
+  const set_plan = createTool({
+    id: "set_plan",
+    description: "Propose a trigger or routine saved on a person already on the roster. The user confirms before it is stored. Do not use this for a connected account.",
+    inputSchema: z.object({
+      recordId: personId,
+      kind: z.enum(["trigger", "routine"]),
+      condition: z.enum(PLAN_CONDITIONS),
+      label: z.string().describe("Short label, from the record, with no account or integration name"),
+      prompt: z.string().describe("What to ask Kobe when they run it, under 280 characters"),
+    }),
+    execute: async ({ recordId, kind, condition, label, prompt }) => {
+      const person = roster.find((item) => item.id === recordId);
+      if (!person) return { ok: false, reason: "That person isn't on the roster." };
+      if (!conditionFits(kind, condition)) return { ok: false, reason: "That condition doesn't match a trigger or a routine." };
+      if (mentionsConnectedAccount(`${label}\n${prompt}`)) return { ok: false, reason: "No accounts are connected. Set this from their record." };
+      if (!recordSupports(person, condition)) return { ok: false, reason: `${person.name}'s record doesn't have that, so I won't invent it.` };
+      return { ok: true, name: person.name, detail: planDetail(person, condition) };
+    },
+  });
+
   const resolve_conflict = createTool({
     id: "resolve_conflict",
     description: "Show two overlapping calendar events side by side plus a draft that fixes the clash.",
@@ -98,6 +121,7 @@ export async function buildKobeAgent(options?: { connectors?: LiveConnectors; ma
       pregame_brief,
       draft_message,
       resolve_conflict,
+      set_plan,
       ...createConnectorTools({ gmail: connectors.gmail, slack: connectors.slack, mailbox }),
     },
   });

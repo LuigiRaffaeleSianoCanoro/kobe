@@ -259,8 +259,8 @@ test("the confirm endpoint ignores anything except confirm: true", async () => {
 
 test("the scripted matcher, push-to-talk, and the composer send button stay put", () => {
   const matcher = readFileSync(new URL("../lib/agent.ts", import.meta.url), "utf8");
-  assert.match(matcher, /function reply\(input: string\)/);
-  assert.match(matcher, /This offline demo only knows the sample roster/);
+  assert.match(matcher, /export function scriptedReply\(input: string\)/);
+  assert.match(matcher, /export const reply = scriptedReply/);
   const app = readFileSync(new URL("../components/kobe-app.tsx", import.meta.url), "utf8");
   assert.match(app, /useChatRuntime\(\{ transport, adapters \}\)/);
   assert.match(app, /useLocalRuntime\(kobeAdapter, \{ adapters \}\)/);
@@ -269,7 +269,12 @@ test("the scripted matcher, push-to-talk, and the composer send button stay put"
   assert.match(app, /title="Send"/);
   assert.match(app, /<Ball size=\{46\} line=\{2\} \/>/);
   assert.doesNotMatch(app, /SOON|coming soon|OFFLINE DEMO|DEMO · SAMPLE DATA/);
+  const cards = readFileSync(new URL("../components/tool-cards.tsx", import.meta.url), "utf8");
+  assert.match(cards, /if \(!armed\) \{\s*setArmed\(true\);\s*setNotice\("Sending waits for an explicit confirm\."\);\s*return;\s*\}/);
+  assert.match(cards, /confirm: true/);
   const agent = readFileSync(new URL("../lib/kobe-agent.ts", import.meta.url), "utf8");
   assert.match(agent, /createConnectorTools/);
   assert.match(agent, /connectorInstructions/);
+  assert.match(agent, /set_plan/);
+  assert.doesNotMatch(agent, /You cannot send messages/);
 });

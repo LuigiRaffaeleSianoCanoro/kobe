@@ -42,6 +42,19 @@ create table if not exists plays (
   primary key (day, play_id)
 );
 
+-- Triggers and routines the user sets. They hang off a person already on the roster.
+-- A row is not an integration and not a connected account.
+create table if not exists plans (
+  id         text primary key,
+  person_id  text not null references people(id) on delete cascade,
+  kind       text not null check (kind in ('trigger', 'routine')),
+  condition  text not null check (condition in ('birthday', 'last_touch', 'next_up', 'open_loop', 'daily', 'weekly')),
+  label      text not null,
+  prompt     text not null,
+  created_at timestamptz not null default now(),
+  unique (person_id, kind, condition)
+);
+
 create table if not exists imports (
   id            bigserial primary key,
   source        text not null default 'WHATSAPP',

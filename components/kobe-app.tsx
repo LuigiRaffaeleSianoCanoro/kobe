@@ -15,16 +15,17 @@ import { Mic, Square } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
-import { connectorBadge, type ConnectorFlags } from "@/lib/connectors";
+import { type ConnectorFlags } from "@/lib/connectors";
 import { CHANNELS, PLAYS, RECORDS, SOURCE_GROUPS, levelFor, type Person, type RecordId } from "@/lib/data";
 import { game, registerAsk, useGame } from "@/lib/game";
 import { LANG_NAMES, dictation, useHydrated, useVoice, voice } from "@/lib/voice";
 import { CourtShader } from "./court-shader";
+import { SavedPlanList, SetPlan } from "./plan-panel";
 import { ServiceLogo } from "./service-logo";
-import { BriefCard, ConflictCard, ConnectorDraftCard, ConnectorSendCard, DraftCard, GmailSearchCard, PeopleCard, SlackSearchCard } from "./tool-cards";
+import { BriefCard, ConflictCard, ConnectorDraftCard, ConnectorSendCard, DraftCard, GmailSearchCard, PeopleCard, PlanCard, SlackSearchCard } from "./tool-cards";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
-const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any conflicts this week?", "Who haven't I talked to lately?"];
+const CHIPS = ["Who has a birthday this week?", "Brief me on Marcus", "Any conflicts this week?", "Who haven't I talked to lately?", "Remind me before Maya's birthday"];
 
 // Live: Mastra agent on the Neon AI Gateway via /api/chat. Offline: scripted local agent.
 const transport = new AssistantChatTransport({ api: "/api/chat" });
@@ -119,7 +120,7 @@ function Header() {
       <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
         <button onClick={() => game.openModal("sources")} className="glass press flex h-[38px] flex-none items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold whitespace-nowrap">
           Integrations
-          <ConnectedBadge />
+          <HeaderLive />
         </button>
         <button onClick={() => game.openModal("channels")} className="press flex h-[38px] flex-none items-center gap-2 rounded-full bg-chalk px-4 text-[13px] font-bold whitespace-nowrap text-ink">
           Add Kobe to…
@@ -315,6 +316,7 @@ function AssistantMessage() {
                   pregame_brief: BriefCard,
                   draft_message: DraftCard,
                   resolve_conflict: ConflictCard,
+                  set_plan: PlanCard,
                   gmail_search: GmailSearchCard,
                   gmail_draft: ConnectorDraftCard,
                   gmail_send: ConnectorSendCard,
@@ -580,6 +582,10 @@ function GamePlan() {
             </button>
           );
         })}
+        <div className="mt-1 flex flex-col gap-2 border-t border-white/10 pt-2">
+          <SavedPlanList />
+          <SetPlan />
+        </div>
       </div>
     </div>
   );
@@ -644,16 +650,22 @@ function Modal({ open, onClose, children, width }: { open: boolean; onClose: () 
   );
 }
 
-function ConnectedBadge() {
-  const connected = useConnectorStatus();
-  if (!connected.gmail && !connected.slack) return null;
-  return <span className="label rounded-md bg-green/20 px-1.5 py-0.5 text-green">ON</span>;
+function probedLive(id: string, connected: ConnectorFlags) {
+  return (id === "gmail" && connected.gmail) || (id === "slack" && connected.slack);
 }
 
-function ConnectorMark({ id }: { id: string }) {
+function LiveBadge() {
+  return <span className="label flex-none rounded-md bg-green/15 px-1.5 py-0.5 text-[10px] text-green">LIVE</span>;
+}
+
+function NotConnected() {
+  return <span className="label flex-none rounded-md bg-white/[.07] px-1.5 py-0.5 text-[10px] text-chalk-3">NOT CONNECTED</span>;
+}
+
+function HeaderLive() {
   const connected = useConnectorStatus();
-  if (connectorBadge(id, connected) !== "on") return null;
-  return <span className="label flex-none rounded-md bg-green/20 px-1.5 py-0.5 text-[10px] text-green">ON</span>;
+  if (!connected.gmail && !connected.slack) return null;
+  return <LiveBadge />;
 }
 
 function connectedNote(connected: ConnectorFlags) {
@@ -688,7 +700,9 @@ function Integrations() {
           <>
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Scouting sources</div>
-              <div className="text-sm text-[#BDB5AA]">{connectedNote(connected) ?? "Kobe will read them to build context and never post on your behalf."}</div>
+              <div className="text-sm text-[#BDB5AA]">
+                {connectedNote(connected) ?? "Gmail and Slack are the live connectors. Every other source stays on this device and does not send."}
+              </div>
             </div>
             {SOURCE_GROUPS.map((g) => (
               <div key={g.name} className="flex flex-col gap-2.5">
@@ -699,9 +713,9 @@ function Integrations() {
                       <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.07] text-[#CFC7BB]"><ServiceLogo id={it.id} size={22} /></span>
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span className="text-sm font-semibold">{it.name}</span>
-                        <span className="truncate text-xs text-[#ACA397]">{it.desc}</span>
+                        <span className="truncate text-xs text-[#ACA397]">{probedLive(it.id, connected) ? "Live connector" : "Not connected"}</span>
                       </span>
-                      <ConnectorMark id={it.id} />
+                      {probedLive(it.id, connected) ? <LiveBadge /> : <NotConnected />}
                     </div>
                   ))}
                 </div>
@@ -712,7 +726,7 @@ function Integrations() {
           <>
             <div className="flex flex-col gap-1.5">
               <div className="display text-[38px]">Put Kobe in your rotation</div>
-              <div className="text-sm text-[#BDB5AA]">{connectedNote(connected) ?? "Talk to Kobe wherever you already message."}</div>
+              <div className="text-sm text-[#BDB5AA]">{connectedNote(connected) ?? "Slack can send. Telegram, WhatsApp, and Discord are not connected."}</div>
             </div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-2">
               {CHANNELS.map((ch) => (
@@ -720,9 +734,9 @@ function Integrations() {
                   <span className="grid h-9 w-9 flex-none place-items-center rounded-[10px] bg-white/[.08]"><ServiceLogo id={ch.id} size={22} /></span>
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="text-sm font-semibold">{ch.name}</span>
-                    <span className="truncate text-xs text-[#ACA397]">{ch.desc}</span>
+                    <span className="truncate text-xs text-[#ACA397]">{probedLive(ch.id, connected) ? "Live connector" : "Not connected"}</span>
                   </span>
-                  <ConnectorMark id={ch.id} />
+                  {probedLive(ch.id, connected) ? <LiveBadge /> : <NotConnected />}
                 </div>
               ))}
             </div>
@@ -781,6 +795,11 @@ function RecordModal() {
             ))}
           </div>
           <div className="rounded-xl bg-gold/10 px-3.5 py-3 text-[13.5px] leading-snug text-[#F4E3BC]">Open loop: {r.loop}</div>
+          <div className="flex flex-col gap-2">
+            <span className="label text-gold">Triggers & routines</span>
+            <SavedPlanList personId={r.id} />
+            <SetPlan personId={r.id} />
+          </div>
           <div className="flex flex-wrap gap-1.5">
             {r.sources.map((s) => (
               <span key={s} className="label rounded-full border border-white/15 px-2 py-1 text-[#CFC7BB]">

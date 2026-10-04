@@ -10,6 +10,7 @@ Built for the Build Personal Agents Hack. MIT licensed, every dependency is open
 - **Live agent (optional).** With Neon AI Gateway credentials, `/api/chat` runs a [Mastra](https://mastra.ai) agent over your roster. Without them, a scripted offline agent answers a few questions with the same cards.
 - **Message drafts you send yourself.** "Copy for Instagram" copies the draft to your clipboard and logs the touch on that person's record. With Postgres, the draft text is stored with it. Gmail and Slack can search and draft when those accounts are connected. Sending either one waits until you explicitly confirm.
 - **Season mode.** XP, levels (Rookie → Mamba), a streak of consecutive active days, assists for every draft you log, and a three-play game plan per day.
+- **Game plan you set.** From chat or the game-plan panel, set a trigger or a routine on a person already in the roster. A trigger reads a birthday, last touch, next plan, or open loop already on that record. A routine is a daily or weekly check-in. With Postgres it is stored in `plans` on that person. Without a database it is stored in this browser. Setting one does not connect an inbox, calendar, or social account.
 - **Scouting reports** per person with a rapport score that rises as you keep in touch.
 - **Postgres (optional).** The roster and season stats persist in Postgres. Without a database they live in memory for the session.
 

@@ -212,15 +212,23 @@ test("Gmail and Slack drafts do not send until the user confirms", async () => {
   assert.equal(waiting.status, "awaiting_confirm");
   assert.deepEqual(calls, ["gmail-draft"]);
 
-  const sent = await tools.gmail_send!.execute!({ draftId: gmailDraft.draftId }, contextFor("send it"));
-  assert.equal(sent.ok, true);
-  const again = await tools.gmail_send!.execute!({ draftId: gmailDraft.draftId }, contextFor("send it"));
-  assert.equal(again.ok, true);
+  const sameTurn = await tools.gmail_send!.execute!({ draftId: gmailDraft.draftId }, contextFor("send it"));
+  assert.equal(sameTurn.ok, false);
+  if (sameTurn.ok || !("status" in sameTurn)) return;
+  assert.equal(sameTurn.status, "awaiting_confirm");
+  assert.deepEqual(calls, ["gmail-draft"]);
+
+  const confirmed = await sendHeldDraft({ draftId: gmailDraft.draftId, explicitConfirm: true, mailbox, gmail, slack, connector: "gmail" });
+  assert.equal(confirmed.status, "sent");
+  const again = await sendHeldDraft({ draftId: gmailDraft.draftId, explicitConfirm: true, mailbox, gmail, slack, connector: "gmail" });
+  assert.equal(again.status, "sent");
   assert.deepEqual(calls, ["gmail-draft", "gmail-send:prov-1"]);
 
   const slackDraft = await tools.slack_draft!.execute!({ channel: "general", body: "On my way" }, contextFor("Draft a slack note"));
   assert.equal(slackDraft.ok, true);
   if (!slackDraft.ok || !("draftId" in slackDraft)) return;
+  const slackSameTurn = await tools.slack_send!.execute!({ draftId: slackDraft.draftId }, contextFor("send it"));
+  assert.equal(slackSameTurn.ok, false);
   const slackWaiting = await sendHeldDraft({
     draftId: slackDraft.draftId,
     explicitConfirm: false,
@@ -234,6 +242,66 @@ test("Gmail and Slack drafts do not send until the user confirms", async () => {
   const slackSent = await sendHeldDraft({ draftId: slackDraft.draftId, explicitConfirm: true, mailbox, gmail, slack, connector: "slack" });
   assert.equal(slackSent.status, "sent");
   assert.equal(calls.filter((call) => call === "slack-send:#general").length, 1);
+});
+
+test("a same-turn draft-then-send does not send", async () => {
+  const calls: string[] = [];
+  const gmail: GmailClient = {
+    async search() {
+      return [];
+    },
+    async draft() {
+      calls.push("gmail-draft");
+      return { draftId: "prov-fresh" };
+    },
+    async sendDraft(id) {
+      calls.push(`gmail-send:${id}`);
+    },
+  };
+  const slack: SlackClient = {
+    async search() {
+      return [];
+    },
+    async send(input) {
+      calls.push(`slack-send:${input.channel}`);
+    },
+  };
+  const mailbox = createMailbox();
+  const tools = createConnectorTools({ gmail, slack, mailbox });
+  const contextFor = (text: string): ToolExecutionContext => {
+    const requestContext = new RequestContext();
+    requestContext.setRaw(USER_TEXT, text);
+    return { requestContext } as ToolExecutionContext;
+  };
+
+  const gmailDraft = await tools.gmail_draft!.execute!({ to: "maya@example.com", subject: "Birthday", body: "New copy the user has not seen" }, contextFor("send it"));
+  assert.equal(gmailDraft.ok, true);
+  if (!gmailDraft.ok || !("draftId" in gmailDraft)) return;
+  const gmailSent = await tools.gmail_send!.execute!({ draftId: gmailDraft.draftId }, contextFor("send it"));
+  assert.equal(gmailSent.ok, false);
+  if (gmailSent.ok || !("status" in gmailSent)) return;
+  assert.equal(gmailSent.status, "awaiting_confirm");
+
+  const slackDraft = await tools.slack_draft!.execute!({ channel: "#general", body: "New slack text" }, contextFor("send it"));
+  assert.equal(slackDraft.ok, true);
+  if (!slackDraft.ok || !("draftId" in slackDraft)) return;
+  const slackSent = await tools.slack_send!.execute!({ draftId: slackDraft.draftId }, contextFor("yes, send it"));
+  assert.equal(slackSent.ok, false);
+  if (slackSent.ok || !("status" in slackSent)) return;
+  assert.equal(slackSent.status, "awaiting_confirm");
+  assert.deepEqual(calls, ["gmail-draft"]);
+
+  const card = await handleConnectorSend({ draftId: gmailDraft.draftId, confirm: true }, (draftId, explicitConfirm) =>
+    sendHeldDraft({ draftId, explicitConfirm, mailbox, gmail, slack, connector: "gmail" }),
+  );
+  assert.equal(card.status, 200);
+  assert.equal(card.body.status, "sent");
+  assert.deepEqual(calls, ["gmail-draft", "gmail-send:prov-fresh"]);
+
+  const later = createConnectorTools({ gmail, slack, mailbox });
+  const seen = await later.slack_send!.execute!({ draftId: slackDraft.draftId }, contextFor("send it"));
+  assert.equal(seen.ok, true);
+  assert.deepEqual(calls.filter((call) => call.startsWith("slack-send")), ["slack-send:#general"]);
 });
 
 test("the confirm endpoint ignores anything except confirm: true", async () => {

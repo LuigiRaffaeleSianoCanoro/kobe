@@ -105,14 +105,14 @@ export function connectorInstructions(flags: ConnectorFlags): string {
   ];
   if (flags.gmail) {
     lines.push(
-      'Gmail is connected. Use gmail_search to look up mail and gmail_draft to create a draft. Neither one sends. Call gmail_send only when the user\'s latest message is an explicit confirmation such as "send it" or "confirm send". Otherwise it waits. Never say an email was sent unless gmail_send returns status "sent".',
+      'Gmail is connected. Use gmail_search to look up mail and gmail_draft to create a draft. Neither one sends. gmail_send may send only a draft from an earlier turn that the user already saw, and only when their latest message is an explicit confirmation such as "send it". A draft created in this turn does not send, even if they said "send it". Never say an email was sent unless gmail_send returns status "sent".',
     );
   } else {
     lines.push("Gmail is not connected. Do not claim you searched or drafted email.");
   }
   if (flags.slack) {
     lines.push(
-      'Slack is connected. Use slack_search to look up messages and slack_draft to hold a message. Neither one posts it. Call slack_send only when the user\'s latest message is an explicit confirmation such as "send it" or "confirm send". Otherwise it waits. Never say a Slack message was sent unless slack_send returns status "sent".',
+      'Slack is connected. Use slack_search to look up messages and slack_draft to hold a message. Neither one posts it. slack_send may post only a draft from an earlier turn that the user already saw, and only when their latest message is an explicit confirmation such as "send it". A draft created in this turn does not post, even if they said "send it". Never say a Slack message was sent unless slack_send returns status "sent".',
     );
   } else {
     lines.push("Slack is not connected. Do not claim you searched or drafted Slack.");
@@ -356,10 +356,14 @@ export async function sendHeldDraft(input: {
   gmail: GmailClient | null;
   slack: SlackClient | null;
   connector?: "gmail" | "slack";
+  draftedThisRequest?: ReadonlySet<string>;
 }): Promise<HeldSendResult> {
   const draft = input.mailbox.get(input.draftId);
   if (!draft || (input.connector && draft.connector !== input.connector)) return { ok: false, status: "missing_draft", error: "That draft isn't here." };
   if (draft.sent) return { ok: true, status: "sent", draftId: draft.id };
+  if (input.draftedThisRequest?.has(draft.id)) {
+    return { ok: false, status: "awaiting_confirm", error: "Sending waits until you confirm the draft you already saw.", draftId: draft.id };
+  }
   if (input.explicitConfirm !== true) {
     return { ok: false, status: "awaiting_confirm", error: "Sending waits for an explicit confirm.", draftId: draft.id };
   }
@@ -406,6 +410,7 @@ export async function handleConnectorSend(body: unknown, send: (draftId: string,
 export function createConnectorTools(input: { gmail: GmailClient | null; slack: SlackClient | null; mailbox: Mailbox }) {
   const tools: Record<string, ReturnType<typeof createTool>> = {};
   const { gmail, slack, mailbox } = input;
+  const draftedThisRequest = new Set<string>();
 
   if (gmail) {
     tools.gmail_search = createTool({
@@ -441,16 +446,25 @@ export function createConnectorTools(input: { gmail: GmailClient | null; slack: 
             sent: false,
             sending: false,
           });
+          draftedThisRequest.add(draft.id);
           return { ok: true as const, status: "draft" as const, draftId: draft.id, to: address, subject, body };
         });
       },
     });
     tools.gmail_send = createTool({
       id: "gmail_send",
-      description: 'Send a Gmail draft created by gmail_draft. Waits unless the user\'s latest message is an explicit confirmation such as "send it".',
-      inputSchema: z.object({ draftId: z.string().describe("draftId returned by gmail_draft") }),
+      description: 'Send a Gmail draft the user already saw on an earlier turn. Refuses a draft created in this request, even when they said "send it". Also waits unless their latest message is an explicit confirmation such as "send it".',
+      inputSchema: z.object({ draftId: z.string().describe("draftId from an earlier gmail_draft the user already saw") }),
       execute: async ({ draftId }, context) =>
-        sendHeldDraft({ draftId, explicitConfirm: explicitConfirmFrom(context), mailbox, gmail, slack, connector: "gmail" }),
+        sendHeldDraft({
+          draftId,
+          explicitConfirm: explicitConfirmFrom(context),
+          mailbox,
+          gmail,
+          slack,
+          connector: "gmail",
+          draftedThisRequest,
+        }),
     });
   }
 
@@ -485,16 +499,25 @@ export function createConnectorTools(input: { gmail: GmailClient | null; slack: 
             sent: false,
             sending: false,
           });
+          draftedThisRequest.add(draft.id);
           return { ok: true as const, status: "draft" as const, draftId: draft.id, channel: target, body: draft.body };
         });
       },
     });
     tools.slack_send = createTool({
       id: "slack_send",
-      description: 'Post a Slack draft created by slack_draft. Waits unless the user\'s latest message is an explicit confirmation such as "send it".',
-      inputSchema: z.object({ draftId: z.string().describe("draftId returned by slack_draft") }),
+      description: 'Post a Slack draft the user already saw on an earlier turn. Refuses a draft created in this request, even when they said "send it". Also waits unless their latest message is an explicit confirmation such as "send it".',
+      inputSchema: z.object({ draftId: z.string().describe("draftId from an earlier slack_draft the user already saw") }),
       execute: async ({ draftId }, context) =>
-        sendHeldDraft({ draftId, explicitConfirm: explicitConfirmFrom(context), mailbox, gmail, slack, connector: "slack" }),
+        sendHeldDraft({
+          draftId,
+          explicitConfirm: explicitConfirmFrom(context),
+          mailbox,
+          gmail,
+          slack,
+          connector: "slack",
+          draftedThisRequest,
+        }),
     });
   }
 

@@ -2,8 +2,11 @@ import { toAISdkStream } from "@mastra/ai-sdk";
 import { RequestContext } from "@mastra/core/request-context";
 import { createUIMessageStream, createUIMessageStreamResponse, safeValidateUIMessages } from "ai";
 import { parseChatRequest } from "@/lib/chat-request";
+import { readCoaching } from "@/lib/coaching-db";
 import { USER_TEXT } from "@/lib/connectors";
 import { buildKobeAgent } from "@/lib/kobe-agent";
+import { loadRoster } from "@/lib/roster";
+import { CoachingList, mergeCoaching } from "@/lib/tape";
 
 export const maxDuration = 60;
 
@@ -19,16 +22,19 @@ export async function POST(req: Request) {
   }
   const raw = await req.text();
   if (raw.length > MAX_BODY_CHARS) return new Response("This conversation is too long. Reload to start a new one.", { status: 413 });
-  const request = parseChatRequest(raw);
-  const parsed = await safeValidateUIMessages({ messages: request.messages });
+  const body = parseChatRequest(raw);
+  const parsed = await safeValidateUIMessages({ messages: body.messages });
   if (!parsed.success) return new Response("Invalid messages.", { status: 400 });
-  // Instructions come from the server only.
+  // Instructions come from the server only. Coaching is a separate field, checked against the roster.
   const messages = parsed.data.filter((m) => m.role !== "system").slice(-MAX_MESSAGES);
+  const fromClient = CoachingList.safeParse(body.coaching).data ?? [];
+  const roster = await loadRoster();
+  const saved = ((await readCoaching()) ?? []).map(({ personId, note }) => ({ personId, note }));
 
   const requestContext = new RequestContext();
   requestContext.setRaw(USER_TEXT, lastUserText(messages));
 
-  const agent = await buildKobeAgent({ voice: request.voice });
+  const agent = await buildKobeAgent(mergeCoaching(new Set(roster.map((person) => person.id)), saved, fromClient), { voice: body.voice });
   const stream = await agent.stream(messages, { maxSteps: 3, requestContext });
 
   const ui = createUIMessageStream({

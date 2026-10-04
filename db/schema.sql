@@ -35,6 +35,13 @@ create table if not exists touches (
   created_at timestamptz not null default now()
 );
 
+-- One coaching note per person, written while reviewing game tape.
+create table if not exists coaching_notes (
+  person_id  text primary key references people(id) on delete cascade,
+  note       text not null check (char_length(note) between 1 and 400),
+  updated_at timestamptz not null default now()
+);
+
 -- Daily game plan completions.
 create table if not exists plays (
   day     date not null default current_date,

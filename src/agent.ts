@@ -113,17 +113,69 @@ export function neglected(person: Person, now = new Date()): boolean {
   return days !== null && days > STALE_AFTER_DAYS;
 }
 
-/** First roster person whose name is mentioned. Does not invent a person. */
-export function mentionedPerson(people: Person[], text: string): Person | undefined {
-  const ranked = [...people].sort((a, b) => b.name.length - a.name.length);
-  return ranked.find((person) => {
+/** Letter or number on either side, including accented and non-Latin letters. ASCII `\b` misses those. */
+function mentionsName(text: string, name: string): boolean {
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(name)}(?![\\p{L}\\p{N}])`, "iu").test(text);
+}
+
+/** True when the ask names someone after "brief me on" / "pregame on", whether or not they are on the roster. */
+function asksForNamedPerson(text: string): boolean {
+  return /(?:brief(?:\s+me)?|pregame)\s+on\s+\S/iu.test(text);
+}
+
+function fullNameMatches(people: Person[], text: string): Person[] {
+  return people.filter((person) => {
     const name = person.name.trim();
-    if (!name) return false;
-    if (new RegExp(`\\b${escapeRegExp(name)}\\b`, "i").test(text)) return true;
-    const first = name.split(/\s+/)[0];
-    if (!first || first.length < 3) return false;
-    return new RegExp(`\\b${escapeRegExp(first)}\\b`, "i").test(text);
+    return name.length > 0 && mentionsName(text, name);
   });
+}
+
+function firstNameMatches(people: Person[], text: string): Person[] {
+  const groups = new Map<string, Person[]>();
+  for (const person of people) {
+    const name = person.name.trim();
+    const first = name.split(/\s+/)[0];
+    if (!first || first.length < 3 || first === name) continue;
+    if (!mentionsName(text, first)) continue;
+    const key = first.toLocaleLowerCase();
+    const group = groups.get(key) ?? [];
+    group.push(person);
+    groups.set(key, group);
+  }
+  return [...groups.values()].flat();
+}
+
+/** Full name wins. A shared first name is not a guess. */
+function resolveMention(people: Person[], text: string): { person?: Person; ambiguous?: Person[] } {
+  const named = fullNameMatches(people, text);
+  if (named.length === 1) return { person: named[0] };
+  if (named.length > 1) {
+    const longest = Math.max(...named.map((person) => person.name.trim().length));
+    const best = named.filter((person) => person.name.trim().length === longest);
+    if (best.length === 1) return { person: best[0] };
+    return { ambiguous: best };
+  }
+  const byFirst = firstNameMatches(people, text);
+  if (byFirst.length === 1) return { person: byFirst[0] };
+  if (byFirst.length > 1) return { ambiguous: byFirst };
+  return {};
+}
+
+/** The one roster person named in the text. Undefined when nobody matches or the first name is shared. */
+export function mentionedPerson(people: Person[], text: string): Person | undefined {
+  return resolveMention(people, text).person;
+}
+
+function whichPerson(matches: Person[]): AgentReply {
+  const names = [...matches]
+    .map((person) => person.name.trim())
+    .filter((name) => name.length > 0)
+    .sort((a, b) => a.localeCompare(b));
+  if (names.length === 0) return { text: "Which person?" };
+  const firsts = new Set(names.map((name) => name.split(/\s+/)[0]?.toLocaleLowerCase()));
+  const who = firsts.size === 1 ? names[0].split(/\s+/)[0] : "person";
+  const list = names.length === 2 ? `${names[0]} or ${names[1]}` : names.join(", ");
+  return { text: `Which ${who}? ${list}.` };
 }
 
 function personName(people: Person[], id: string): string {
@@ -141,14 +193,20 @@ function countText(count: number, singular: string, plural: string): string {
 }
 
 /** Canned replies. Person cards and briefs point at CRM ids; the UI reads fields from the store. */
-export function reply(text: string, sources: Record<string, boolean>, people: Person[]): AgentReply {
+export function reply(text: string, sources: Record<string, boolean>, people: Person[], personId?: string): AgentReply {
   const t = text.toLowerCase();
   if (/(brief|pregame)/.test(t)) {
-    const named = mentionedPerson(people, text);
+    if (personId) {
+      const chosen = people.find((person) => person.id === personId);
+      return chosen ? briefFor(chosen) : { text: "That person is not on the roster." };
+    }
+    const mention = resolveMention(people, text);
+    if (mention.ambiguous) return whichPerson(mention.ambiguous);
+    if (mention.person) return briefFor(mention.person);
+    if (asksForNamedPerson(text)) return { text: "That person is not on the roster." };
     const marcus = people.find((person) => person.id === "marcus");
-    const target = named ?? marcus;
-    if (!target) return { text: "That person is not on the roster." };
-    return briefFor(target);
+    if (!marcus) return { text: "That person is not on the roster." };
+    return briefFor(marcus);
   }
   if (/\b(marcus|coffee)\b/.test(t) && !/(draft|message|write|congrats)/.test(t)) {
     const marcus = people.find((person) => person.id === "marcus");

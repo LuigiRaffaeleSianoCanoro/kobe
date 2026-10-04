@@ -10,7 +10,7 @@ export type Channel = {
   steps: string[];
 };
 
-export type AlertAction = { label: string; run?: string; record?: string };
+export type AlertAction = { label: string; run?: string; record?: string; personId?: string };
 
 export type FeedItem = {
   at: number;
@@ -40,7 +40,7 @@ export const D = {
   ] as Channel[],
   feed: [
     { at: 1400, kind: "BIRTHDAY", source: "INSTAGRAM", color: "#F2B63A", title: "Maya Chen turns 29 tomorrow", body: "You last talked 6 weeks ago. She's been posting from Brooklyn.", a1: { label: "Draft message", run: "Draft a birthday message for Maya" }, a2: { label: "Open record", record: "maya" } },
-    { at: 4200, kind: "PREGAME", source: "FATHOM", color: "#9B6CE0", title: "Coffee with Marcus Reid at 3:30", body: "Last call Sep 12. He moved to Austin, and you owe him an intro.", a1: { label: "Brief me", run: "Brief me on Marcus" }, a2: { label: "Snooze" } },
+    { at: 4200, kind: "PREGAME", source: "FATHOM", color: "#9B6CE0", title: "Coffee with Marcus Reid at 3:30", body: "Last call Sep 12. He moved to Austin, and you owe him an intro.", a1: { label: "Brief me", run: "Brief me on Marcus", personId: "marcus" }, a2: { label: "Snooze" } },
     { at: 8500, kind: "CONFLICT", source: "PARTIFUL × CALENDAR", color: "#E5484D", title: "Double-booked Thursday 7:00 PM", body: "Dinner with Jordan overlaps Product sync.", a1: { label: "Resolve", run: "Fix my Thursday conflict" }, a2: { label: "Keep both" } },
     { at: 15000, kind: "FOLLOW UP", source: "WHATSAPP", color: "#E0712A", title: "Dev hasn't heard back in 9 days", body: "He asked if you can help him move on the 17th.", a1: { label: "Draft reply", run: "Draft a reply to Dev" }, a2: { label: "Open record", record: "dev" } },
     { at: 24000, kind: "LIFE UPDATE", source: "LINKEDIN", color: "#3DBE8B", title: "Priya Nair started a new role", body: 'Head of Design at Northwind. You said "coffee soon" in July.', a1: { label: "Congratulate", run: "Draft congrats to Priya" }, a2: { label: "Open record", record: "priya" } },

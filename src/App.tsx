@@ -101,7 +101,7 @@ export default function App() {
   const act = (a: LiveAlert, action?: AlertAction) => {
     dismiss(a.id);
     if (!action) return;
-    if (action.run) runAgent(action.run);
+    if (action.run) runAgent(action.run, action.personId);
     if (action.record) openRecord(action.record);
   };
 

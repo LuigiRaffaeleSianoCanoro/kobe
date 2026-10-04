@@ -26,3 +26,6 @@ input::placeholder { color: #A39A8E; }
 .xbtn:hover { background: rgba(255,255,255,.14); }
 .src:hover { background: rgba(255,255,255,.07); }
 .ch:hover { background: rgba(255,255,255,.07); }
+.field { width: 100%; box-sizing: border-box; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.14); border-radius: 10px; color: #F4F1EC; font: inherit; font-size: 14px; padding: 8px 10px; }
+.field:focus { outline: none; border-color: rgba(242,182,58,.7); }
+textarea.field { resize: vertical; min-height: 72px; }

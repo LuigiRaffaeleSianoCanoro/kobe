@@ -1,13 +1,44 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CHIPS, D, INITIAL_SOURCES, PAIR_CODE, VOICE_LINES, type AlertAction, type FeedItem } from "./data";
 import { reply, type AgentReply } from "./agent";
 import { Court } from "./Court";
+import { PersonReport } from "./PersonReport";
+import { CRM_STORAGE_KEY, blankPerson, browserStorage, cardMeta, cardRight, cloneSeed, findPerson, fromForm, initials, peopleFromStoredJson, readPeople, readPeopleForUpdate, toForm, writePeople, type Person, type PersonForm } from "./crm";
 
 type Message = AgentReply & { id: number; role: "agent" | "user"; sent?: boolean };
 type LiveAlert = FeedItem & { id: number; visible: boolean };
 
 const mono = "'JetBrains Mono', monospace";
 const glass = "rgba(16,12,20,.66)";
+const COMPOSER_PLACEHOLDER = "Ask Kobe about anyone you know…";
+
+let placeholderMeasure: CanvasRenderingContext2D | null = null;
+
+/** Content-box width, with 1px of slack so a rounded edge cannot clip the placeholder. */
+function composerTextBudget(el: HTMLElement) {
+  const rect = el.getBoundingClientRect();
+  const style = getComputedStyle(el);
+  const padding = (Number.parseFloat(style.paddingLeft) || 0) + (Number.parseFloat(style.paddingRight) || 0);
+  const border = (Number.parseFloat(style.borderLeftWidth) || 0) + (Number.parseFloat(style.borderRightWidth) || 0);
+  return rect.width - padding - border - 1;
+}
+
+function placeholderThatFits(text: string, maxWidth: number, font: string) {
+  if (typeof document === "undefined" || maxWidth <= 0) return text;
+  if (!placeholderMeasure) placeholderMeasure = document.createElement("canvas").getContext("2d");
+  const ctx = placeholderMeasure;
+  if (!ctx) return text;
+  ctx.font = font;
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  const words = text.split(" ");
+  let kept = "";
+  for (const word of words) {
+    const next = kept ? `${kept} ${word}` : word;
+    if (ctx.measureText(`${next}…`).width > maxWidth) break;
+    kept = next;
+  }
+  return kept ? `${kept}…` : "…";
+}
 
 function Ball({ size, shadow }: { size: number; shadow?: string }) {
   const seam = size >= 40 ? 2 : 1.5;
@@ -27,21 +58,36 @@ function Diamond() {
 
 export default function App() {
   const scrollRef = useRef<HTMLElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
+  const composerRef = useRef<HTMLInputElement>(null);
   const timers = useRef<number[]>([]);
   const recInt = useRef<number | null>(null);
   const voiceI = useRef(-1);
   const aid = useRef(0);
 
   const [vw, setVw] = useState(window.innerWidth);
+  const [headerHeight, setHeaderHeight] = useState(68);
   const [input, setInput] = useState("");
+  const [composerPlaceholder, setComposerPlaceholder] = useState(COMPOSER_PLACEHOLDER);
   const [typing, setTyping] = useState(false);
-  const [modal, setModal] = useState<null | "sources" | "channels">(null);
+  const [modal, setModal] = useState<null | "sources" | "channels" | "roster">(null);
   const [record, setRecord] = useState<string | null>(null);
   const [pairing, setPairing] = useState("telegram");
   const [pairBusy, setPairBusy] = useState(false);
   const [sources, setSources] = useState<Record<string, boolean>>({ ...INITIAL_SOURCES });
   const sourcesRef = useRef(sources);
   sourcesRef.current = sources;
+  const [people, setPeople] = useState<Person[]>(() => {
+    try {
+      return readPeople(browserStorage());
+    } catch {
+      return cloneSeed();
+    }
+  });
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const peopleRef = useRef(people);
+  peopleRef.current = people;
+  const [form, setForm] = useState<PersonForm | null>(null);
   const [channels, setChannels] = useState<Record<string, boolean>>({});
   const [alerts, setAlerts] = useState<LiveAlert[]>([]);
   const [messages, setMessages] = useState<Message[]>([
@@ -70,14 +116,14 @@ export default function App() {
     setAlerts((s) => s.map((x) => (x.id === id ? { ...x, visible: false } : x)));
   };
 
-  const runAgent = (text: string) => {
+  const runAgent = (text: string, personId?: string) => {
     if (!text || !text.trim()) return;
     const id = Date.now();
     setInput("");
     setTyping(true);
     setMessages((s) => [...s, { id, role: "user", text }]);
     later(() => {
-      const r = reply(text, sourcesRef.current);
+      const r = reply(text, sourcesRef.current, peopleRef.current, personId);
       setTyping(false);
       setMessages((s) => [...s, { id: id + 1, role: "agent", ...r }]);
     }, 900 + Math.random() * 600);
@@ -86,8 +132,8 @@ export default function App() {
   const act = (a: LiveAlert, action?: AlertAction) => {
     dismiss(a.id);
     if (!action) return;
-    if (action.run) runAgent(action.run);
-    if (action.record) setRecord(action.record);
+    if (action.run) runAgent(action.run, action.personId);
+    if (action.record) openRecord(action.record);
   };
 
   const sync = (title: string, body: string, source: string) => {
@@ -112,6 +158,47 @@ export default function App() {
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [messages.length, typing]);
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== CRM_STORAGE_KEY || event.newValue == null) return;
+      const next = peopleFromStoredJson(event.newValue);
+      if (next) setPeople(next);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const measure = () => {
+      const next = el.offsetHeight;
+      setHeaderHeight((prev) => (prev === next ? prev : next));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    const fit = () => {
+      const next = placeholderThatFits(COMPOSER_PLACEHOLDER, composerTextBudget(el), getComputedStyle(el).font);
+      setComposerPlaceholder((prev) => (prev === next ? prev : next));
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    let alive = true;
+    document.fonts?.ready.then(() => { if (alive) fit(); }).catch(() => {});
+    return () => {
+      alive = false;
+      observer.disconnect();
+    };
+  }, [rec, vw]);
 
   const startRec = () => {
     setRec(true);
@@ -155,6 +242,78 @@ export default function App() {
     }, 1500);
   };
 
+  const openRecord = (id: string) => {
+    setForm(null);
+    setRecord(id);
+  };
+
+  const startCreate = () => {
+    const person = blankPerson();
+    setSaveError(null);
+    setForm(toForm(person));
+    setRecord(person.id);
+    setModal(null);
+  };
+
+  const editRecord = () => {
+    if (!record) return;
+    const saved = findPerson(people, record);
+    if (!saved) return;
+    setSaveError(null);
+    setForm(toForm(saved));
+  };
+
+  const saveForm = () => {
+    if (!form) return;
+    const snapshot = form;
+    const remembered = findPerson(peopleRef.current, snapshot.id);
+    const commit = (): boolean => {
+      const storage = browserStorage();
+      const stored = readPeopleForUpdate(storage);
+      if (!stored) return false;
+      const existing = findPerson(stored, snapshot.id) ?? remembered;
+      const nextPerson = fromForm(snapshot, existing);
+      const next = findPerson(stored, nextPerson.id)
+        ? stored.map((person) => (person.id === nextPerson.id ? nextPerson : person))
+        : [...stored, nextPerson];
+      if (!writePeople(storage, next)) return false;
+      setPeople(next);
+      setSaveError(null);
+      setForm(null);
+      setRecord(nextPerson.id);
+      return true;
+    };
+    const fail = () => {
+      setSaveError("Couldn't save. Browser storage rejected the write, so this record is unchanged.");
+    };
+    const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+    if (locks) {
+      try {
+        void locks.request(CRM_STORAGE_KEY, () => {
+          if (!commit()) fail();
+        }).catch(() => fail());
+      } catch {
+        fail();
+      }
+      return;
+    }
+    if (!commit()) fail();
+  };
+
+  const cancelForm = () => {
+    if (!form) return;
+    const exists = people.some((person) => person.id === form.id);
+    setSaveError(null);
+    setForm(null);
+    if (!exists) setRecord(null);
+  };
+
+  const closeReport = () => {
+    setSaveError(null);
+    setForm(null);
+    setRecord(null);
+  };
+
   const wide = vw >= 1000;
   const connectedCount = Object.values(sources).filter(Boolean).length;
   const channelCount = Object.values(channels).filter(Boolean).length;
@@ -165,37 +324,44 @@ export default function App() {
     const v = a.visible && (wide || shown++ < 1);
     return { ...a, visible: v };
   });
+  const headerDelta = wide ? 0 : Math.max(0, headerHeight - 68);
   const lane = wide
     ? { chatTop: 68, chatRight: 380, laneTop: 76, laneBottom: 104, laneRight: 20, laneW: "340px", laneMask: "linear-gradient(#000 calc(100% - 24px), transparent)" }
-    : { chatTop: 284, chatRight: 0, laneTop: 72, laneBottom: "calc(100vh - 280px)", laneRight: 16, laneW: "calc(100vw - 32px)", laneMask: "none" };
+    : { chatTop: 284 + headerDelta, chatRight: 0, laneTop: 72 + headerDelta, laneBottom: `calc(100vh - ${280 + headerDelta}px)`, laneRight: 16, laneW: "calc(100vw - 32px)", laneMask: "none" };
 
   const pc = D.channels.find((c) => c.id === pairing) ?? D.channels[0];
   const added = !!channels[pc.id];
-  const rr = record ? D.records[record] : null;
   const tab = (on: boolean) => ({ bg: on ? "#F4F1EC" : "transparent", fg: on ? "#15110D" : "#D3CBC0" });
   const ts = tab(modal === "sources");
   const tc = tab(modal === "channels");
+  const tr = tab(modal === "roster");
+  const savedRecord = record ? findPerson(people, record) ?? null : null;
+  const reportOpen = Boolean(record && (savedRecord || form));
 
   return (
     <>
       <Court />
-      <header style={{ position: "fixed", top: 0, left: 0, right: 0, height: 68, display: "flex", alignItems: "center", gap: 16, padding: "0 20px", zIndex: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <header ref={headerRef} style={{ position: "fixed", top: 0, left: 0, right: 0, minHeight: 68, boxSizing: "border-box", display: "flex", flexWrap: "wrap", alignItems: "center", alignContent: "center", columnGap: 8, rowGap: 8, padding: "0 16px", zIndex: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flex: "none" }}>
           <Ball size={26} shadow="0 2px 10px rgba(224,113,42,.45)" />
-          <div style={{ fontWeight: 800, fontStretch: "72%", fontSize: 24, letterSpacing: ".01em", lineHeight: 1 }}>
+          <div style={{ fontWeight: 800, fontStretch: "72%", fontSize: 24, letterSpacing: ".01em", lineHeight: 1, whiteSpace: "nowrap" }}>
             KOBE<span style={{ color: "#F2B63A" }}>.AI</span>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 999, background: "rgba(16,12,20,.5)", border: "1px solid rgba(255,255,255,.08)", backdropFilter: "blur(14px)", font: `500 11px ${mono}`, letterSpacing: ".06em", color: "#D9D2C7" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "none", padding: "6px 12px", borderRadius: 999, background: "rgba(16,12,20,.5)", border: "1px solid rgba(255,255,255,.08)", backdropFilter: "blur(14px)", font: `500 11px ${mono}`, letterSpacing: ".06em", color: "#D9D2C7", whiteSpace: "nowrap" }}>
           <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#3DBE8B", boxShadow: "0 0 10px #3DBE8B", animation: "kpulse 1.8s ease-in-out infinite" }} />
           <span>SCOUTING {connectedCount} SOURCES</span>
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <button className="hover-int" onClick={() => setModal("sources")} style={{ display: "flex", alignItems: "center", gap: 8, height: 38, padding: "0 14px", borderRadius: 999, background: "rgba(16,12,20,.6)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,.1)", color: "#F4F1EC", fontSize: 13, fontWeight: 600 }}>
+        <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 8, maxWidth: "100%", minWidth: "min-content", flex: "0 1 auto" }}>
+          <button className="hover-int" aria-label="Roster" onClick={() => setModal("roster")} style={{ display: "flex", alignItems: "center", gap: 8, flex: "none", height: 38, padding: "0 14px", borderRadius: 999, background: "rgba(16,12,20,.6)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,.1)", color: "#F4F1EC", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
+            <span>Roster</span>
+            <span style={{ font: `600 11px ${mono}`, padding: "2px 6px", borderRadius: 6, background: "rgba(242,182,58,.18)", color: "#F2B63A" }}>{people.length}</span>
+          </button>
+          <button className="hover-int" onClick={() => setModal("sources")} style={{ display: "flex", alignItems: "center", gap: 8, flex: "none", height: 38, padding: "0 14px", borderRadius: 999, background: "rgba(16,12,20,.6)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,.1)", color: "#F4F1EC", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
             <span>Integrations</span>
             <span style={{ font: `600 11px ${mono}`, padding: "2px 6px", borderRadius: 6, background: "rgba(242,182,58,.18)", color: "#F2B63A" }}>{connectedCount}</span>
           </button>
-          <button className="hover-cream" onClick={() => setModal("channels")} style={{ display: "flex", alignItems: "center", gap: 8, height: 38, padding: "0 16px", borderRadius: 999, background: "#F4F1EC", border: "none", color: "#15110D", fontSize: 13, fontWeight: 700 }}>
+          <button className="hover-cream" onClick={() => setModal("channels")} style={{ display: "flex", alignItems: "center", gap: 8, flex: "none", height: 38, padding: "0 16px", borderRadius: 999, background: "#F4F1EC", border: "none", color: "#15110D", fontSize: 13, fontWeight: 700, whiteSpace: "nowrap" }}>
             <span>Add Kobe to…</span>
             {channelCount > 0 && <span style={{ font: `600 11px ${mono}`, padding: "2px 6px", borderRadius: 6, background: "#15110D", color: "#F2B63A" }}>{channelCount}</span>}
           </button>
@@ -227,34 +393,48 @@ export default function App() {
                     <div style={{ padding: "12px 16px", borderRadius: "4px 18px 18px 18px", background: glass, backdropFilter: "blur(18px) saturate(140%)", border: "1px solid rgba(255,255,255,.08)", fontSize: 15, lineHeight: 1.5, color: "#F4F1EC", textWrap: "pretty", alignSelf: "flex-start" }}>{m.text}</div>
                     {m.people && (
                       <div style={{ display: "flex", flexDirection: "column", borderRadius: 16, overflow: "hidden", background: glass, backdropFilter: "blur(18px)", border: "1px solid rgba(255,255,255,.08)" }}>
-                        {m.people.map((p) => (
-                          <button key={p.id} className="rowbtn" onClick={() => setRecord(p.id)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", background: "transparent", border: "none", borderBottom: "1px solid rgba(255,255,255,.06)", color: "#F4F1EC", textAlign: "left" }}>
-                            <div style={{ width: 34, height: 34, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(242,182,58,.14)", color: "#F2B63A", fontWeight: 800, fontStretch: "75%", fontSize: 14 }}>{p.initials}</div>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 }}>
-                              <span style={{ fontSize: 14.5, fontWeight: 600 }}>{p.name}</span>
-                              <span style={{ fontSize: 12.5, color: "#BDB5AA" }}>{p.meta}</span>
-                            </div>
-                            <span style={{ font: `500 11px ${mono}`, color: "#F2B63A", letterSpacing: ".04em" }}>{p.right}</span>
-                          </button>
-                        ))}
+                        {m.people.map((card) => {
+                          const person = findPerson(people, card.id);
+                          if (!person) return null;
+                          const role = cardMeta(person, card.metaField);
+                          const meta = card.metaField === "role" && person.sources[0] ? [role, person.sources[0]].filter((part) => part.length > 0).join(" · ") : role;
+                          const right = cardRight(person, card.rightField);
+                          return (
+                            <button key={card.id} className="rowbtn" aria-label={`Open ${person.name || "record"}`} onClick={() => openRecord(person.id)} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", background: "transparent", border: "none", borderBottom: "1px solid rgba(255,255,255,.06)", color: "#F4F1EC", textAlign: "left" }}>
+                              <div style={{ width: 34, height: 34, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(242,182,58,.14)", color: "#F2B63A", fontWeight: 800, fontStretch: "75%", fontSize: 14 }}>{initials(person.name)}</div>
+                              <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 }}>
+                                <span style={{ fontSize: 14.5, fontWeight: 600 }}>{person.name}</span>
+                                <span style={{ fontSize: 12.5, color: "#BDB5AA" }}>{meta}</span>
+                              </div>
+                              <span style={{ font: `500 11px ${mono}`, color: "#F2B63A", letterSpacing: ".04em" }}>{right}</span>
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
-                    {m.brief && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16, borderRadius: 16, background: "rgba(16,12,20,.7)", backdropFilter: "blur(18px)", border: "1px solid rgba(242,182,58,.25)" }}>
-                        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-                          <span style={{ font: `500 10.5px ${mono}`, letterSpacing: ".14em", color: "#F2B63A" }}>PREGAME</span>
-                          <span style={{ fontSize: 12.5, color: "#BDB5AA" }}>{m.brief.next}</span>
+                    {m.brief && (() => {
+                      const person = findPerson(people, m.brief.id);
+                      if (!person) return null;
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16, borderRadius: 16, background: "rgba(16,12,20,.7)", backdropFilter: "blur(18px)", border: "1px solid rgba(242,182,58,.25)" }}>
+                          <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                            <span style={{ font: `500 10.5px ${mono}`, letterSpacing: ".14em", color: "#F2B63A" }}>PREGAME</span>
+                            <span style={{ fontSize: 12.5, color: "#BDB5AA" }}>{person.nextPlan}</span>
+                          </div>
+                          <div style={{ fontWeight: 800, fontStretch: "70%", fontSize: 30, lineHeight: 1, minHeight: "1em", textTransform: "uppercase" }}>{person.name}</div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                            {person.points.map((point, index) => (
+                              <div key={`${point}-${index}`} style={{ display: "flex", gap: 10, fontSize: 14, lineHeight: 1.45, color: "#E6E0D7" }}><Diamond /><span>{point}</span></div>
+                            ))}
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "10px 12px", borderRadius: 10, background: "rgba(242,182,58,.1)", fontSize: 13.5, color: "#F4E3BC" }}>
+                            <span style={{ font: `500 10.5px ${mono}`, letterSpacing: ".12em", color: "#F2B63A" }}>OPEN LOOP</span>
+                            <span>{person.openLoop}</span>
+                          </div>
+                          <button className="hover-cream" aria-label="Full scouting report" onClick={() => openRecord(person.id)} style={{ alignSelf: "flex-start", height: 32, padding: "0 14px", borderRadius: 999, background: "#F4F1EC", border: "none", color: "#15110D", fontSize: 12.5, fontWeight: 700 }}>Full scouting report</button>
                         </div>
-                        <div style={{ fontWeight: 800, fontStretch: "70%", fontSize: 30, lineHeight: 1, textTransform: "uppercase" }}>{m.brief.name}</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                          {m.brief.points.map((pt) => (
-                            <div key={pt} style={{ display: "flex", gap: 10, fontSize: 14, lineHeight: 1.45, color: "#E6E0D7" }}><Diamond /><span>{pt}</span></div>
-                          ))}
-                        </div>
-                        <div style={{ padding: "10px 12px", borderRadius: 10, background: "rgba(242,182,58,.1)", fontSize: 13.5, color: "#F4E3BC" }}>Open loop: {m.brief.loop}</div>
-                        <button className="hover-cream" onClick={() => setRecord(m.brief!.id)} style={{ alignSelf: "flex-start", height: 32, padding: "0 14px", borderRadius: 999, background: "#F4F1EC", border: "none", color: "#15110D", fontSize: 12.5, fontWeight: 700 }}>Full scouting report</button>
-                      </div>
-                    )}
+                      );
+                    })()}
                     {m.draft && (
                       <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16, borderRadius: 16, background: "rgba(16,12,20,.7)", backdropFilter: "blur(18px)", border: "1px solid rgba(255,255,255,.1)" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, font: `500 10.5px ${mono}`, letterSpacing: ".12em", color: "#BDB5AA" }}>
@@ -293,7 +473,7 @@ export default function App() {
       <div style={{ position: "fixed", left: 0, right: lane.chatRight, bottom: 22, zIndex: 10, padding: "0 16px" }}>
         <div style={{ maxWidth: 720, margin: "0 auto", display: "flex", alignItems: "center", gap: 10, padding: "8px 8px 8px 20px", borderRadius: 999, background: "rgba(16,12,20,.72)", backdropFilter: "blur(20px) saturate(150%)", border: "1px solid rgba(255,255,255,.12)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
           {!rec ? (
-            <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runAgent(input); }} placeholder="Ask Kobe about anyone you know…" style={{ flex: 1, minWidth: 0, height: 40, background: "transparent", border: "none", outline: "none", color: "#F4F1EC", font: "400 15.5px 'Archivo', system-ui, sans-serif" }} />
+            <input ref={composerRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") runAgent(input); }} placeholder={composerPlaceholder} aria-label={COMPOSER_PLACEHOLDER} style={{ flex: "1 1 0%", minWidth: 0, height: 40, padding: 0, background: "transparent", border: "none", outline: "none", color: "#F4F1EC", font: "400 15.5px 'Archivo', system-ui, sans-serif" }} />
           ) : (
             <div style={{ flex: 1, minWidth: 0, height: 40, display: "flex", alignItems: "center", gap: 12, animation: "kfade .2s ease both" }}>
               <span style={{ font: `600 12px ${mono}`, letterSpacing: ".08em", color: "#E5484D" }}>● 0:{String(recSec).padStart(2, "0")}</span>
@@ -305,10 +485,10 @@ export default function App() {
               <button className="ghost" onClick={() => stopRec(false)} style={{ flex: "none", height: 30, padding: "0 12px", borderRadius: 999, background: "transparent", border: "1px solid rgba(255,255,255,.16)", color: "#D3CBC0", fontSize: 12.5 }}>Cancel</button>
             </div>
           )}
-          <button className="mic" title={rec ? "Stop and send" : "Voice message"} onClick={() => (rec ? stopRec(true) : startRec())} style={{ flex: "none", width: 46, height: 46, padding: 0, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: rec ? "#E5484D" : "rgba(255,255,255,.06)", border: `1px solid ${rec ? "#E5484D" : "rgba(255,255,255,.14)"}`, color: rec ? "#fff" : "#F4F1EC", animation: rec ? "kring 1.2s ease-out infinite" : "none", transition: "background .2s, transform .2s" }}>
+          <button className="mic" title={rec ? "Stop and send" : "Voice message"} onClick={() => (rec ? stopRec(true) : startRec())} style={{ flex: "0 0 46px", width: 46, height: 46, padding: 0, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: rec ? "#E5484D" : "rgba(255,255,255,.06)", border: `1px solid ${rec ? "#E5484D" : "rgba(255,255,255,.14)"}`, color: rec ? "#fff" : "#F4F1EC", animation: rec ? "kring 1.2s ease-out infinite" : "none", transition: "background .2s, transform .2s" }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0" /><line x1="12" y1="18" x2="12" y2="21" /><line x1="8.5" y1="21" x2="15.5" y2="21" /></svg>
           </button>
-          <button className="send-ball" title="Send" onClick={() => runAgent(input)} style={{ flex: "none", position: "relative", width: 46, height: 46, padding: 0, borderRadius: "50%", overflow: "hidden", border: "none", background: "transparent" }}>
+          <button className="send-ball" title="Send" onClick={() => runAgent(input)} style={{ flex: "0 0 46px", position: "relative", width: 46, height: 46, padding: 0, borderRadius: "50%", overflow: "hidden", border: "none", background: "transparent" }}>
             <Ball size={46} shadow="0 6px 18px rgba(224,113,42,.45)" />
           </button>
         </div>
@@ -344,11 +524,33 @@ export default function App() {
           <div onClick={(e) => e.stopPropagation()} style={{ width: "min(860px, 100%)", maxHeight: "84vh", display: "flex", flexDirection: "column", borderRadius: 24, background: "rgba(18,13,16,.9)", backdropFilter: "blur(26px) saturate(150%)", border: "1px solid rgba(255,255,255,.1)", boxShadow: "0 40px 100px rgba(0,0,0,.6)", overflow: "hidden", animation: "kpop .45s cubic-bezier(.2,1.25,.4,1) both" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "20px 22px 0" }}>
               <div style={{ display: "flex", gap: 4, padding: 4, borderRadius: 999, background: "rgba(255,255,255,.06)" }}>
+                <button onClick={() => setModal("roster")} style={{ height: 32, padding: "0 14px", borderRadius: 999, border: "none", background: tr.bg, color: tr.fg, fontSize: 13, fontWeight: 700 }}>Roster</button>
                 <button onClick={() => setModal("sources")} style={{ height: 32, padding: "0 14px", borderRadius: 999, border: "none", background: ts.bg, color: ts.fg, fontSize: 13, fontWeight: 700 }}>Integrations</button>
                 <button onClick={() => setModal("channels")} style={{ height: 32, padding: "0 14px", borderRadius: 999, border: "none", background: tc.bg, color: tc.fg, fontSize: 13, fontWeight: 700 }}>Add Kobe to…</button>
               </div>
               <button className="xbtn" onClick={() => setModal(null)} style={{ marginLeft: "auto", width: 34, height: 34, borderRadius: "50%", background: "rgba(255,255,255,.06)", border: "none", color: "#F4F1EC", fontSize: 18 }}>×</button>
             </div>
+            {modal === "roster" && (
+              <div style={{ overflowY: "auto", padding: "20px 22px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ fontWeight: 800, fontStretch: "68%", fontSize: 36, lineHeight: 1, textTransform: "uppercase" }}>Roster</div>
+                  <div style={{ fontSize: 14, color: "#BDB5AA" }}>Each person is a record in this browser. Creates and edits stay after a reload. Neon is not connected.</div>
+                </div>
+                <button className="gold" aria-label="Add person" onClick={startCreate} style={{ alignSelf: "flex-start", height: 38, padding: "0 16px", borderRadius: 999, background: "#F2B63A", border: "none", color: "#15110D", fontSize: 13.5, fontWeight: 700 }}>Add person</button>
+                <div style={{ display: "flex", flexDirection: "column", borderRadius: 16, overflow: "hidden", border: "1px solid rgba(255,255,255,.08)" }}>
+                  {people.map((person) => (
+                    <button key={person.id} className="rowbtn" aria-label={`Open ${person.name || "empty record"}`} onClick={() => { setModal(null); openRecord(person.id); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", background: "rgba(255,255,255,.03)", border: "none", borderBottom: "1px solid rgba(255,255,255,.06)", color: "#F4F1EC", textAlign: "left" }}>
+                      <div style={{ width: 34, height: 34, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(242,182,58,.14)", color: "#F2B63A", fontWeight: 800, fontStretch: "75%", fontSize: 14 }}>{initials(person.name)}</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 }}>
+                        <span style={{ fontSize: 14.5, fontWeight: 600, minHeight: "1.2em" }}>{person.name}</span>
+                        <span style={{ fontSize: 12.5, color: "#BDB5AA" }}>{person.role}</span>
+                      </div>
+                      {person.sample ? <span style={{ font: `600 10px ${mono}`, letterSpacing: ".1em", color: "#BDB5AA" }}>SAMPLE</span> : null}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {modal === "sources" && (
               <div style={{ overflowY: "auto", padding: "20px 22px 24px", display: "flex", flexDirection: "column", gap: 22 }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -443,46 +645,18 @@ export default function App() {
         </div>
       )}
 
-      {rr && (
-        <div onClick={() => setRecord(null)} style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8,5,4,.5)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, animation: "kfade .2s ease both" }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ width: "min(460px, 100%)", maxHeight: "86vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 18, padding: 22, borderRadius: 24, background: "rgba(18,13,16,.92)", backdropFilter: "blur(26px)", border: "1px solid rgba(255,255,255,.1)", boxShadow: "0 40px 100px rgba(0,0,0,.6)", animation: "kpop .45s cubic-bezier(.2,1.25,.4,1) both" }}>
-            <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
-                <span style={{ font: `500 10.5px ${mono}`, letterSpacing: ".16em", color: "#F2B63A" }}>SCOUTING REPORT</span>
-                <span style={{ fontWeight: 800, fontStretch: "66%", fontSize: 44, lineHeight: 0.92, textTransform: "uppercase" }}>{rr.name}</span>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-                  <span style={{ fontSize: 13.5, color: "#CFC7BB" }}>{rr.role}</span>
-                  <span style={{ font: `600 10px ${mono}`, letterSpacing: ".1em", padding: "3px 7px", borderRadius: 6, background: "rgba(242,182,58,.16)", color: "#F2B63A" }}>{rr.tier}</span>
-                </div>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
-                <span style={{ fontWeight: 900, fontStretch: "62%", fontSize: 72, lineHeight: 0.85, color: "transparent", WebkitTextStroke: "1.5px #F2B63A" }}>{rr.score}</span>
-                <span style={{ font: `500 9.5px ${mono}`, letterSpacing: ".16em", color: "#A39A8E" }}>RAPPORT</span>
-              </div>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "96px 1fr", gap: "10px 14px", padding: "14px 0", borderTop: "1px solid rgba(255,255,255,.08)", borderBottom: "1px solid rgba(255,255,255,.08)", fontSize: 13.5 }}>
-              <span style={{ font: `500 10.5px ${mono}`, letterSpacing: ".1em", color: "#A39A8E", paddingTop: 2 }}>BIRTHDAY</span><span>{rr.birthday}</span>
-              <span style={{ font: `500 10.5px ${mono}`, letterSpacing: ".1em", color: "#A39A8E", paddingTop: 2 }}>LAST TOUCH</span><span>{rr.last}</span>
-              <span style={{ font: `500 10.5px ${mono}`, letterSpacing: ".1em", color: "#A39A8E", paddingTop: 2 }}>NEXT UP</span><span>{rr.next}</span>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <span style={{ font: `500 10.5px ${mono}`, letterSpacing: ".14em", color: "#F2B63A" }}>TALKING POINTS</span>
-              {rr.points.map((pt) => (
-                <div key={pt} style={{ display: "flex", gap: 10, fontSize: 14, lineHeight: 1.45, color: "#E6E0D7" }}><Diamond /><span>{pt}</span></div>
-              ))}
-            </div>
-            <div style={{ padding: "11px 13px", borderRadius: 12, background: "rgba(242,182,58,.1)", fontSize: 13.5, lineHeight: 1.45, color: "#F4E3BC" }}>Open loop: {rr.loop}</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {rr.sources.map((src) => (
-                <span key={src} style={{ font: `500 10.5px ${mono}`, letterSpacing: ".06em", padding: "4px 8px", borderRadius: 999, border: "1px solid rgba(255,255,255,.14)", color: "#CFC7BB" }}>{src}</span>
-              ))}
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="gold" onClick={() => { const prompt = rr.prompt; setRecord(null); runAgent(prompt); }} style={{ flex: 1, height: 42, borderRadius: 999, background: "#F2B63A", border: "none", color: "#15110D", fontSize: 14, fontWeight: 700 }}>{rr.action}</button>
-              <button className="ghost" onClick={() => setRecord(null)} style={{ height: 42, padding: "0 18px", borderRadius: 999, background: "transparent", border: "1px solid rgba(255,255,255,.16)", color: "#F4F1EC", fontSize: 14 }}>Close</button>
-            </div>
-          </div>
-        </div>
+      {reportOpen && (
+        <PersonReport
+          saved={savedRecord}
+          form={form}
+          onForm={setForm}
+          onEdit={editRecord}
+          onSave={saveForm}
+          onCancel={cancelForm}
+          onClose={closeReport}
+          onAsk={(prompt, personId) => { closeReport(); runAgent(prompt, personId); }}
+          saveError={saveError}
+        />
       )}
     </>
   );

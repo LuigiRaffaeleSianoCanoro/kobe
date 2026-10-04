@@ -1,0 +1,36 @@
+# Self-host Kobe.ai: `KOBE_PASSWORD=choose-one docker compose up --build`, then open http://localhost:3000
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: kobe
+      # Only applied when the volume is first created.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kobe}
+      POSTGRES_DB: kobe
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    # No published port: the app reaches Postgres on the compose network.
+    # To query it from the host, add `ports: ["127.0.0.1:5432:5432"]`.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kobe"]
+      interval: 3s
+      retries: 10
+
+  app:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://kobe:${POSTGRES_PASSWORD:-kobe}@db:5432/kobe
+      KOBE_PASSWORD: ${KOBE_PASSWORD:?Set KOBE_PASSWORD, the password for the Kobe web UI}
+      # Optional: live agent. Leave empty for the offline scripted agent.
+      NEON_AI_GATEWAY_TOKEN: ${NEON_AI_GATEWAY_TOKEN:-}
+      NEON_AI_GATEWAY_BASE_URL: ${NEON_AI_GATEWAY_BASE_URL:-}
+      KOBE_MODEL: ${KOBE_MODEL:-neon/gpt-oss-120b}
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

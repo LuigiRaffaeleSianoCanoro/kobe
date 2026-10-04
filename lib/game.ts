@@ -19,6 +19,8 @@ type GameState = {
   modal: null | "sources" | "channels";
   alerts: Alert[];
   floaters: Floater[];
+  // Read out by screen readers when an import finishes.
+  notice: string;
 };
 
 const NO_PLAYS: Record<PlayId, boolean> = { maya: false, marcus: false, dev: false };
@@ -36,6 +38,7 @@ let state: GameState = {
   modal: null,
   alerts: [],
   floaters: [],
+  notice: "",
 };
 
 const listeners = new Set<() => void>();
@@ -118,6 +121,8 @@ export const game = {
     set({ people: byId(roster) });
     sync();
   },
+  setRoster: (roster: Person[]) => set({ people: byId(roster) }),
+  notify: (notice: string) => set({ notice }),
 
   pushAlert(a: FeedItem & { auto?: boolean }) {
     const id = ++uid;

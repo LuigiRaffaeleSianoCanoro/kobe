@@ -5,7 +5,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { isDraftChannel } from "@/lib/data";
 import { game, useGame } from "@/lib/game";
-import { planDetail, planId, PlanWrite, recordSupports, samePlan, type PlanCondition, type PlanKind } from "@/lib/plans";
+import { planDetail, planFromToolArgs, planIdForCard, recordSupports, samePlan, type PlanCondition, type PlanKind } from "@/lib/plans";
 
 const EASE_OUT = [0.23, 1, 0.32, 1] as const;
 
@@ -217,26 +217,32 @@ function blockedReason(result: unknown): string | null {
   return typeof row.reason === "string" && row.reason.trim() ? row.reason : "That can't be saved on the record.";
 }
 
-type PlanArgs = { recordId?: string; kind?: PlanKind; condition?: PlanCondition; label?: string; prompt?: string };
+type PlanArgs = { recordId?: string; personId?: string; kind?: PlanKind; condition?: PlanCondition; label?: string; prompt?: string };
 
 export function PlanCard({ args, toolCallId, status, result }: ToolCallMessagePartProps) {
   const draft = args as PlanArgs;
-  const person = usePerson(draft.recordId);
+  const recordId = draft.recordId || draft.personId;
+  const person = usePerson(recordId);
   const plans = useGame((s) => s.plans);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const id = planId(toolCallId || "draft");
+  const allocated = recordId && draft.kind && draft.condition ? planIdForCard(toolCallId || "draft", { personId: recordId, kind: draft.kind, condition: draft.condition }) : null;
   const blocked = blockedReason(result);
-  const parsed = PlanWrite.safeParse({
-    id,
-    personId: draft.recordId ?? "",
-    kind: draft.kind,
-    condition: draft.condition,
-    label: draft.label ?? "",
-    prompt: draft.prompt ?? "",
-  });
-  const ready = status.type !== "running" && parsed.success && !!person && !!draft.condition && recordSupports(person, draft.condition) && !blocked;
-  const stored = plans.find((plan) => parsed.success && (plan.id === id || samePlan(plan, parsed.data)));
+  const parsed = planFromToolArgs(draft, allocated ?? "plan_pendingrecord");
+  const ready = status.type !== "running" && !!allocated && parsed.success && !!person && !!draft.condition && recordSupports(person, draft.condition) && !blocked;
+  const unmet =
+    status.type !== "running" && !ready && !blocked
+      ? !person
+        ? "That person isn't on the roster."
+        : person && draft.condition && !recordSupports(person, draft.condition)
+          ? `${person.name}'s record doesn't have that, so I won't invent it.`
+          : !parsed.success
+            ? (parsed.error.issues[0]?.message ?? "That plan can't be saved.")
+            : null
+      : null;
+  const cardMatch = allocated && parsed.success ? plans.find((plan) => plan.id === allocated && samePlan(plan, parsed.data)) : undefined;
+  const slotMatch = parsed.success ? plans.find((plan) => samePlan(plan, parsed.data)) : undefined;
+  const stored = cardMatch ?? slotMatch;
 
   const save = async () => {
     if (!parsed.success || busy) return;
@@ -268,16 +274,17 @@ export function PlanCard({ args, toolCallId, status, result }: ToolCallMessagePa
       {blocked ? (
         <div className="text-[13px] leading-snug text-red">{blocked}</div>
       ) : stored ? (
-        <div className="label text-green">{stored.id === id ? "✓ On their record" : "✓ Already on their record"}</div>
+        <div className="label text-green">{cardMatch ? "✓ On their record" : "✓ Already on their record"}</div>
       ) : (
         <div className="flex flex-col gap-2">
           {error && <div className="text-[13px] leading-snug text-red">{error}</div>}
-          {status.type !== "running" && person && draft.condition && !recordSupports(person, draft.condition) && (
-            <div className="text-[13px] leading-snug text-red">{person.name}&apos;s record doesn&apos;t have that, so I won&apos;t invent it.</div>
+          {unmet ? (
+            <div className="text-[13px] leading-snug text-red">{unmet}</div>
+          ) : (
+            <button type="button" disabled={!ready || busy} onClick={() => void save()} className="press self-start rounded-full bg-gold px-3.5 py-2 text-[12.5px] font-bold text-ink disabled:opacity-50">
+              {busy ? "Saving" : "Save to record"}
+            </button>
           )}
-          <button type="button" disabled={!ready || busy} onClick={() => void save()} className="press self-start rounded-full bg-gold px-3.5 py-2 text-[12.5px] font-bold text-ink disabled:opacity-50">
-            {busy ? "Saving" : "Save to record"}
-          </button>
         </div>
       )}
     </CardIn>

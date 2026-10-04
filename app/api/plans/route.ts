@@ -1,4 +1,4 @@
-import { PlanId, PlanWrite, recordSupports, type Plan } from "@/lib/plans";
+import { PlanId, PlanWrite, planIdReuse, recordSupports, type Plan } from "@/lib/plans";
 import { sql } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -56,7 +56,8 @@ export async function POST(req: Request) {
       const [byId] = await tx<PlanRow[]>`
         select id, person_id as "personId", kind, condition, label, prompt
         from plans where id = ${plan.id}`;
-      if (byId) return { plan: byId, duplicate: true };
+      if (byId && planIdReuse(byId, plan) === "duplicate") return { plan: byId, duplicate: true };
+      if (byId) return { error: "That plan id is already on a different record.", status: 409 as const };
       return { error: "Couldn't save that on their record.", status: 409 as const };
     });
     if ("error" in saved) return Response.json({ error: saved.error }, { status: saved.status });

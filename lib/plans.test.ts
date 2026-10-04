@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import {
   PlanWrite,
   interpretPlan,
   isPlanAsk,
   mentionsConnectedAccount,
+  offlinePlanReply,
   parseStoredPlans,
   planDue,
+  planFromToolArgs,
   planId,
+  planIdForCard,
+  planIdReuse,
   recordSupports,
   type PlanPerson,
 } from "./plans.ts";
@@ -200,13 +205,73 @@ test("stored plans drop invalid rows and reject account wording", () => {
   const good = {
     id: planId("maya-birthday"),
     personId: "maya",
-    kind: "trigger",
-    condition: "birthday",
+    kind: "trigger" as const,
+    condition: "birthday" as const,
     label: "When Maya's birthday is on the record",
     prompt: "Draft a birthday message for Maya",
   };
-  const parsed = parseStoredPlans(JSON.stringify([good, { id: "nope" }, null]));
+  const other = {
+    ...good,
+    id: good.id,
+    personId: "dev",
+    kind: "routine" as const,
+    condition: "weekly" as const,
+    label: "Check in with Dev every week",
+    prompt: "Draft a reply to Dev",
+  };
+  const parsed = parseStoredPlans(JSON.stringify([good, other, { id: "nope" }, null]));
   assert.deepEqual(parsed, [good]);
   assert.equal(PlanWrite.safeParse({ ...good, kind: "routine" }).success, false);
   assert.equal(PlanWrite.safeParse({ ...good, label: "When Gmail gets a mail" }).success, false);
+});
+
+test("the offline adapter forwards those recordId args", () => {
+  const source = readFileSync(new URL("./agent.ts", import.meta.url), "utf8");
+  assert.match(source, /offlinePlanReply\(/);
+  assert.match(source, /args:\s*plan\.args/);
+  assert.doesNotMatch(source, /args:\s*intent\.plan/);
+});
+
+test("offline set_plan args use recordId and parse on the card", () => {
+  for (const line of ["Remind me before Maya's birthday", "Every Sunday, check in with Dev"]) {
+    const reply = offlinePlanReply(line, roster);
+    assert.ok(reply?.args, line);
+    if (!reply?.args) continue;
+    assert.equal(Object.hasOwn(reply.args, "personId"), false);
+    const parsed = planFromToolArgs(reply.args, planIdForCard("call_0", { personId: reply.args.recordId, kind: reply.args.kind, condition: reply.args.condition }));
+    assert.equal(parsed.success, true, line);
+    if (!parsed.success) continue;
+    assert.equal(parsed.data.personId, reply.args.recordId);
+    assert.equal(parsed.data.kind, reply.args.kind);
+    assert.equal(parsed.data.condition, reply.args.condition);
+    assert.equal(parsed.data.label, reply.args.label);
+  }
+  const maya = offlinePlanReply("Remind me before Maya's birthday", roster);
+  assert.equal(maya?.args?.recordId, "maya");
+  const dev = offlinePlanReply("Every Sunday, check in with Dev", roster);
+  assert.equal(dev?.args?.recordId, "dev");
+  assert.equal(dev?.args?.condition, "weekly");
+  const fromPersonId = planFromToolArgs(
+    { personId: "maya", kind: "trigger", condition: "birthday", label: "When Maya's birthday is on the record", prompt: "Draft a birthday message for Maya" },
+    planId("fallback"),
+  );
+  assert.equal(fromPersonId.success, true);
+  if (fromPersonId.success) assert.equal(fromPersonId.data.personId, "maya");
+});
+
+test("a reused plan id is a conflict when it belongs to someone else", () => {
+  const maya = { personId: "maya", kind: "trigger" as const, condition: "birthday" as const };
+  const dev = { personId: "dev", kind: "routine" as const, condition: "weekly" as const };
+  assert.equal(planIdReuse(maya, maya), "duplicate");
+  assert.equal(planIdReuse(maya, dev), "conflict");
+  assert.equal(planId("call_0"), "plan_call0record");
+  assert.equal(planId("call_0"), planId("call_0"));
+  const mayaCard = planIdForCard("call_0", maya);
+  const mayaAgain = planIdForCard("call_0", maya);
+  const devCard = planIdForCard("call_0", dev);
+  assert.equal(mayaCard, mayaAgain);
+  assert.notEqual(mayaCard, devCard);
+  assert.notEqual(mayaCard, planId("call_0"));
+  assert.match(mayaCard, /^plan_[a-z0-9]{6,40}$/);
+  assert.match(devCard, /^plan_[a-z0-9]{6,40}$/);
 });

@@ -6,9 +6,9 @@ import { game, useGame, type PlanStorage } from "@/lib/game";
 import {
   conditionsFor,
   describePlan,
+  freshPlanId,
   planDetail,
   planDue,
-  planId,
   type PlanCondition,
   type PlanKind,
   type PlanPerson,
@@ -97,6 +97,7 @@ function PlanEditor({ personId: lockedId, onSaved }: { personId?: string; onSave
   const [kind, setKind] = useState<PlanKind>("trigger");
   const [condition, setCondition] = useState<PlanCondition>("birthday");
   const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const activeId = lockedId && peopleMap[lockedId] ? lockedId : personId;
   const person = peopleMap[activeId];
@@ -107,9 +108,10 @@ function PlanEditor({ personId: lockedId, onSaved }: { personId?: string; onSave
     if (!person || !selected || busy) return;
     setBusy(true);
     setError(null);
+    setNote(null);
     const described = describePlan(asPlanPerson(person), selected);
     const result = await game.savePlan({
-      id: planId(globalThis.crypto?.randomUUID?.() ?? `${Date.now()}`),
+      id: freshPlanId(),
       personId: person.id,
       kind,
       condition: selected,
@@ -119,6 +121,10 @@ function PlanEditor({ personId: lockedId, onSaved }: { personId?: string; onSave
     setBusy(false);
     if (result.status === "rejected") {
       setError(result.message);
+      return;
+    }
+    if (result.status === "duplicate") {
+      setNote("Already on their record.");
       return;
     }
     onSaved();
@@ -173,6 +179,7 @@ function PlanEditor({ personId: lockedId, onSaved }: { personId?: string; onSave
           <div className="text-[13px] leading-snug">{describePlan(asPlanPerson(person), selected).label}</div>
           <div className="text-[12px] leading-snug text-[#BDB5AA]">{planDetail(person, selected)}</div>
           <p className="text-[12px] leading-snug text-chalk-3">This reads their record. It does not connect an account.</p>
+          {note && <p className="text-[12.5px] leading-snug text-green">{note}</p>}
           {error && <p className="text-[12.5px] leading-snug text-red">{error}</p>}
           <button type="button" disabled={busy} onClick={() => void save()} className="press h-8 rounded-full bg-gold text-[12.5px] font-bold text-ink disabled:opacity-50">
             {busy ? "Saving" : "Save to record"}

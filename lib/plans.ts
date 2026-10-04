@@ -105,8 +105,75 @@ export function planId(seed: string): string {
   return `plan_${body}`;
 }
 
+export function freshPlanId(): string {
+  const seed = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+  return planId(seed);
+}
+
+// Tool-call ids such as call_0 are reused and truncated by planId. A card keeps one
+// random id for its own person and condition, and that id is what gets stored.
+const cardPlanIds = new Map<string, string>();
+
+export function planIdForCard(toolCallId: string, slot: { personId: string; kind: string; condition: string }): string {
+  const key = `${toolCallId}\0${slot.personId}\0${slot.kind}\0${slot.condition}`;
+  const known = cardPlanIds.get(key);
+  if (known) return known;
+  const id = freshPlanId();
+  cardPlanIds.set(key, id);
+  return id;
+}
+
 export function samePlan(a: Pick<Plan, "personId" | "kind" | "condition">, b: Pick<Plan, "personId" | "kind" | "condition">): boolean {
   return a.personId === b.personId && a.kind === b.kind && a.condition === b.condition;
+}
+
+export type PlanIdReuse = "duplicate" | "conflict";
+
+// A row that already owns this id can stand in for the save only when it is the same plan.
+export function planIdReuse(
+  existing: Pick<Plan, "personId" | "kind" | "condition">,
+  incoming: Pick<Plan, "personId" | "kind" | "condition">,
+): PlanIdReuse {
+  return samePlan(existing, incoming) ? "duplicate" : "conflict";
+}
+
+export type SetPlanToolArgs = {
+  recordId: string;
+  kind: PlanKind;
+  condition: PlanCondition;
+  label: string;
+  prompt: string;
+};
+
+// Live and offline set_plan cards both read recordId.
+export function setPlanToolArgs(plan: Omit<Plan, "id">): SetPlanToolArgs {
+  return {
+    recordId: plan.personId,
+    kind: plan.kind,
+    condition: plan.condition,
+    label: plan.label,
+    prompt: plan.prompt,
+  };
+}
+
+export function offlinePlanReply(input: string, people: PlanPerson[]) {
+  const intent = interpretPlan(input, people);
+  if (intent.type === "ignore") return null;
+  if (intent.type === "say") return { text: intent.text };
+  return { text: intent.text, args: setPlanToolArgs(intent.plan) };
+}
+
+export function planFromToolArgs(args: { recordId?: string; personId?: string; kind?: unknown; condition?: unknown; label?: unknown; prompt?: unknown }, id: string) {
+  const recordId = typeof args.recordId === "string" ? args.recordId.trim() : "";
+  const personId = typeof args.personId === "string" ? args.personId.trim() : "";
+  return PlanWrite.safeParse({
+    id,
+    personId: recordId || personId,
+    kind: args.kind,
+    condition: args.condition,
+    label: typeof args.label === "string" ? args.label : "",
+    prompt: typeof args.prompt === "string" ? args.prompt : "",
+  });
 }
 
 export function parseStoredPlans(raw: string | null): Plan[] {
@@ -114,9 +181,12 @@ export function parseStoredPlans(raw: string | null): Plan[] {
   try {
     const data = JSON.parse(raw) as unknown;
     if (!Array.isArray(data)) return [];
+    const seen = new Set<string>();
     return data.flatMap((item) => {
       const parsed = PlanWrite.safeParse(item);
-      return parsed.success ? [parsed.data] : [];
+      if (!parsed.success || seen.has(parsed.data.id)) return [];
+      seen.add(parsed.data.id);
+      return [parsed.data];
     });
   } catch {
     return [];

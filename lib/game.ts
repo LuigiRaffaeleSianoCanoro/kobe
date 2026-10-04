@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { ASSIST_XP, FEED, PLAYS, SEED_ROSTER, type DraftChannel, type FeedItem, type Person, type PlayId } from "./data";
-import { PlanWrite, parseStoredPlans, recordSupports, samePlan, type Plan } from "./plans";
+import { PlanWrite, parseStoredPlans, planIdReuse, recordSupports, samePlan, type Plan } from "./plans";
 import type { Season, SeasonEvent } from "./season";
 
 export type PlanStorage = "browser" | "postgres" | "session";
@@ -180,6 +180,8 @@ export const game = {
     const person = state.people[plan.personId];
     if (!person) return { status: "rejected", message: "That person isn't on the roster." };
     if (!recordSupports(person, plan.condition)) return { status: "rejected", message: `${person.name}'s record doesn't have that, so I won't invent it.` };
+    const byId = state.plans.find((item) => item.id === plan.id);
+    if (byId) return planIdReuse(byId, plan) === "duplicate" ? { status: "duplicate" } : { status: "rejected", message: "That plan id is already on a different record." };
     const existing = state.plans.find((item) => samePlan(item, plan));
     if (existing) return { status: "duplicate" };
 
@@ -210,7 +212,7 @@ export const game = {
         return { status: "rejected", message };
       }
       const saved = PlanWrite.safeParse(body?.plan);
-      if (!saved.success) {
+      if (!saved.success || planIdReuse(saved.data, plan) === "conflict") {
         planEpoch++;
         set({ plans: prev });
         notSaved("Couldn't save the game plan", "Their record did not keep it.");

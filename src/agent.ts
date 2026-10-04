@@ -97,6 +97,7 @@ export async function reply(text: string, sources: Record<string, boolean>, peop
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ text, sources, people, personId }),
     });
+    if (!response.ok) return { text: UNAVAILABLE };
     const payload: unknown = await response.json();
     return toAgentReply(payload, people);
   } catch {

@@ -1,7 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import react from "@vitejs/plugin-react";
-import { defineConfig, type Connect, type Plugin } from "vite";
+import { defineConfig, loadEnv, type Connect, type Plugin } from "vite";
+import { refuseApi } from "./lib/access";
 import { createAgentReply } from "./server/agent-reply";
+import { applyServerEnv } from "./server/server-env";
 
 const MAX_BODY_CHARS = 100_000;
 
@@ -30,11 +32,25 @@ function send(res: ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 
+function authorizationHeader(req: IncomingMessage): string | null {
+  const value = req.headers.authorization;
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+}
+
 // The gateway token is read in the Node process. Vite's client env prefix stays VITE_, so the token is not inlined.
 function agentApi(): Plugin {
   const handle = async (req: IncomingMessage, res: ServerResponse, next: (err?: unknown) => void) => {
     if (req.method !== "POST") {
       next();
+      return;
+    }
+    const refusal = refuseApi(authorizationHeader(req));
+    if (refusal) {
+      req.resume();
+      res.statusCode = refusal.status;
+      for (const [key, value] of Object.entries(refusal.headers)) res.setHeader(key, value);
+      res.end(refusal.body);
       return;
     }
     try {
@@ -63,7 +79,13 @@ function agentApi(): Plugin {
   return { name: "kobe-agent-api", configureServer: attach, configurePreviewServer: attach };
 }
 
-export default defineConfig({
-  plugins: [react(), agentApi()],
-  envPrefix: "VITE_",
+export default defineConfig(({ mode }) => {
+  // `.env.local` is the documented place for the gateway token. Load it for this Node process only.
+  // envPrefix stays VITE_, so the token is not exposed to the browser.
+  const fromFiles = loadEnv(mode, process.cwd(), "");
+  applyServerEnv(fromFiles, process.env);
+  return {
+    plugins: [react(), agentApi()],
+    envPrefix: "VITE_",
+  };
 });

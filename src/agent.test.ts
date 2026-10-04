@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 import { reply, toAgentReply, type AgentReply } from "./agent.ts";
 import type { Person } from "./crm.ts";
@@ -81,6 +81,22 @@ test("the Vite client posts to the server and does not keep sent", async () => {
   } finally {
     globalThis.fetch = previous;
   }
+});
+
+test("a refused response does not become a card", async () => {
+  const previous = globalThis.fetch;
+  globalThis.fetch = async () => new Response("Sign in with any username and your KOBE_PASSWORD.", { status: 401 });
+  try {
+    const result = await reply("Brief me", {}, [{ id: "marcus", name: "Marcus Reid" }] as Person[]);
+    assert.deepEqual(result, { text: "Kobe couldn't reach the model. Check the Neon AI Gateway credentials." });
+    assert.equal(result.brief, undefined);
+  } finally {
+    globalThis.fetch = previous;
+  }
+});
+
+test("the Next app does not grow a second agent route", () => {
+  assert.equal(existsSync(new URL("../app/api/agent/route.ts", import.meta.url)), false);
 });
 
 test("the client module never references the gateway token or provider", () => {

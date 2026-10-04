@@ -44,6 +44,8 @@ NEON_AI_GATEWAY_BASE_URL="https://<branch>-api.ai.<cell>.<region>.aws.neon.tech"
 KOBE_MODEL="neon/gpt-oss-120b"
 ```
 
+`pnpm dev` is the Next app. Its chat stays on `/api/chat`. `pnpm dev:vite` is the Vite court. It reads the gateway token, base URL, model, and `KOBE_PASSWORD` from that same `.env.local` inside the Node process. The browser bundle does not receive the token.
+
 Then load the schema. It is safe to re-run after pulling changes:
 
 ```bash

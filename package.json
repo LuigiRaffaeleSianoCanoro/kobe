@@ -7,7 +7,7 @@
     "dev:vite": "vite",
     "build": "next build",
     "start": "next start",
-    "test": "node --experimental-strip-types --test src/agent.test.ts"
+    "test": "node --experimental-strip-types --test src/agent.test.ts lib/access.test.ts server/server-env.test.ts"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.15.23",

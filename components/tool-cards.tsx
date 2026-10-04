@@ -147,6 +147,7 @@ function DraftBody({ draft, logKey, ready }: { draft: Partial<Draft>; logKey: st
   const [editing, setEditing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [armed, setArmed] = useState(false);
   const body = edited ?? draft.body ?? "";
   const to = person?.name ?? draft.recordId ?? "";
   const channel = isDraftChannel(draft.channel) ? draft.channel : undefined;
@@ -158,6 +159,11 @@ function DraftBody({ draft, logKey, ready }: { draft: Partial<Draft>; logKey: st
   };
   const sendDraft = async () => {
     if (!ready || !body || sending || sent) return;
+    if (!armed) {
+      setArmed(true);
+      setNotice("Sending waits for an explicit confirm.");
+      return;
+    }
     if (!channel) {
       setNotice("That channel is not connected.");
       return;
@@ -213,7 +219,7 @@ function DraftBody({ draft, logKey, ready }: { draft: Partial<Draft>; logKey: st
               Copy for {draft.channel ?? "…"}
             </button>
             <button disabled={!ready || !body || sending} onClick={sendDraft} className="press rounded-full border border-white/15 px-3.5 py-2 text-[12.5px] disabled:opacity-50">
-              {sending ? "Sending" : "Send"}
+              {!armed ? "Confirm send" : sending ? "Sending" : "Send this draft"}
             </button>
             <button disabled={!ready} onClick={() => setEditing((e) => !e)} className="press rounded-full border border-white/15 px-3.5 py-2 text-[12.5px] disabled:opacity-50">
               {editing ? "Done" : "Edit"}
@@ -229,6 +235,222 @@ export function DraftCard({ args, toolCallId, status }: ToolCallMessagePartProps
   return (
     <CardIn className="glass flex flex-col gap-3 rounded-2xl p-4">
       <DraftBody draft={args as Partial<Draft>} logKey={toolCallId} ready={status.type !== "running"} />
+    </CardIn>
+  );
+}
+
+type MailHit = { id?: string; from?: string; subject?: string; date?: string; snippet?: string; link?: string };
+type SlackHit = { channel?: string; user?: string; text?: string; link?: string | null };
+
+function asHits<T>(result: unknown): T[] | null {
+  if (!result || typeof result !== "object" || !("hits" in result)) return null;
+  const hits = (result as { hits?: unknown }).hits;
+  return Array.isArray(hits) ? (hits as T[]) : null;
+}
+
+function resultError(result: unknown): string | null {
+  if (!result || typeof result !== "object" || !("ok" in result)) return null;
+  const row = result as { ok?: unknown; error?: unknown };
+  if (row.ok !== false) return null;
+  return typeof row.error === "string" && row.error.trim() ? row.error : "That didn't work.";
+}
+
+function draftIdOf(result: unknown): string | null {
+  if (!result || typeof result !== "object" || !("draftId" in result)) return null;
+  const id = (result as { draftId?: unknown }).draftId;
+  return typeof id === "string" ? id : null;
+}
+
+function safeHttpLink(value: unknown, host: "google" | "slack"): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return null;
+    const ok = host === "google" ? url.hostname === "mail.google.com" : url.hostname === "slack.com" || url.hostname.endsWith(".slack.com");
+    return ok ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function GmailSearchCard({ args, result }: ToolCallMessagePartProps) {
+  const query = (args as Partial<{ query: string }>).query;
+  const hits = asHits<MailHit>(result);
+  const error = resultError(result);
+  return (
+    <CardIn className="glass flex flex-col gap-2 rounded-2xl p-4">
+      <div className="label flex items-center gap-2 text-gold">
+        <span>GMAIL</span>
+        <span className="truncate text-chalk-3">{query}</span>
+      </div>
+      {error ? (
+        <p className="text-[13.5px] text-red">{error}</p>
+      ) : hits ? (
+        hits.length === 0 ? (
+          <p className="text-[13.5px] text-[#BDB5AA]">No matching threads.</p>
+        ) : (
+          hits.map((hit) => {
+            const link = safeHttpLink(hit.link, "google");
+            return (
+              <div key={hit.id ?? hit.subject} className="flex flex-col gap-0.5 border-t border-white/[.06] pt-2">
+                <span className="text-[14px] font-semibold">{hit.subject || "No subject"}</span>
+                <span className="text-[12.5px] text-[#BDB5AA]">{[hit.from, hit.date].filter(Boolean).join(" · ")}</span>
+                {hit.snippet && <span className="text-[13px] leading-snug text-[#E6E0D7]">{hit.snippet}</span>}
+                {link && (
+                  <a href={link} target="_blank" rel="noreferrer" className="text-[12.5px] text-gold">
+                    Open in Gmail
+                  </a>
+                )}
+              </div>
+            );
+          })
+        )
+      ) : (
+        <div className="flex flex-col gap-2">
+          <Shimmer w="70%" />
+          <Shimmer w="45%" />
+        </div>
+      )}
+    </CardIn>
+  );
+}
+
+export function SlackSearchCard({ args, result }: ToolCallMessagePartProps) {
+  const query = (args as Partial<{ query: string }>).query;
+  const hits = asHits<SlackHit>(result);
+  const error = resultError(result);
+  return (
+    <CardIn className="glass flex flex-col gap-2 rounded-2xl p-4">
+      <div className="label flex items-center gap-2 text-gold">
+        <span>SLACK</span>
+        <span className="truncate text-chalk-3">{query}</span>
+      </div>
+      {error ? (
+        <p className="text-[13.5px] text-red">{error}</p>
+      ) : hits ? (
+        hits.length === 0 ? (
+          <p className="text-[13.5px] text-[#BDB5AA]">No matching messages.</p>
+        ) : (
+          hits.map((hit, index) => {
+            const link = safeHttpLink(hit.link, "slack");
+            return (
+              <div key={`${hit.user ?? "slack"}-${index}`} className="flex flex-col gap-0.5 border-t border-white/[.06] pt-2">
+                <span className="text-[12.5px] text-[#BDB5AA]">{[hit.user, hit.channel ? `#${hit.channel}` : ""].filter(Boolean).join(" · ")}</span>
+                <span className="text-[14px] leading-snug">{hit.text}</span>
+                {link && (
+                  <a href={link} target="_blank" rel="noreferrer" className="text-[12.5px] text-gold">
+                    Open in Slack
+                  </a>
+                )}
+              </div>
+            );
+          })
+        )
+      ) : (
+        <div className="flex flex-col gap-2">
+          <Shimmer w="70%" />
+          <Shimmer w="40%" />
+        </div>
+      )}
+    </CardIn>
+  );
+}
+
+function ConfirmSend({ draftId }: { draftId: string }) {
+  const [step, setStep] = useState<"idle" | "confirm" | "sending" | "sent" | "error">("idle");
+  const [error, setError] = useState("");
+  const send = async () => {
+    setStep("sending");
+    setError("");
+    try {
+      const res = await fetch("/api/connectors/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId, confirm: true }),
+      });
+      const data = (await res.json().catch(() => null)) as { status?: string; error?: string } | null;
+      if (res.ok && data?.status === "sent") {
+        setStep("sent");
+        return;
+      }
+      setStep("error");
+      setError(data?.error || "Sending waits for an explicit confirm.");
+    } catch {
+      setStep("error");
+      setError("Couldn't reach Kobe to send that.");
+    }
+  };
+  if (step === "sent") return <div className="label text-green">✓ SENT</div>;
+  if (step === "confirm" || step === "sending" || step === "error") {
+    return (
+      <div className="flex flex-col gap-2">
+        <p className="text-[13px] leading-snug text-[#F4E3BC]">Send this draft? This is the confirm.</p>
+        {error && <p className="text-[13px] text-red">{error}</p>}
+        <div className="flex gap-2">
+          <button type="button" disabled={step === "sending"} onClick={() => void send()} className="press rounded-full bg-gold px-3.5 py-2 text-[12.5px] font-bold text-ink disabled:opacity-50">
+            {step === "sending" ? "Sending" : "Send this draft"}
+          </button>
+          <button type="button" disabled={step === "sending"} onClick={() => setStep("idle")} className="press rounded-full border border-white/15 px-3.5 py-2 text-[12.5px] disabled:opacity-50">
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <button type="button" onClick={() => setStep("confirm")} className="press self-start rounded-full bg-gold px-3.5 py-2 text-[12.5px] font-bold text-ink">
+      Confirm send
+    </button>
+  );
+}
+
+export function ConnectorDraftCard({ args, result, status, toolName }: ToolCallMessagePartProps) {
+  const slack = toolName.startsWith("slack");
+  const draft = args as Partial<{ to: string; subject: string; body: string; channel: string }>;
+  const error = resultError(result);
+  const draftId = draftIdOf(result);
+  const ready = status.type !== "running";
+  const sent = !!result && typeof result === "object" && (result as { status?: string }).status === "sent";
+  return (
+    <CardIn className="glass flex flex-col gap-3 rounded-2xl p-4">
+      <div className="label flex items-center gap-2 text-[#BDB5AA]">
+        <span>{slack ? "SLACK DRAFT" : "GMAIL DRAFT"}</span>
+        <span className="ml-auto text-gold">{slack ? draft.channel : draft.to}</span>
+      </div>
+      {!slack && draft.subject && <div className="text-[14px] font-semibold">{draft.subject}</div>}
+      <p className="min-h-6 text-[15px] leading-normal">
+        {draft.body}
+        {!ready && <span className="ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 animate-pulse bg-gold" />}
+      </p>
+      {error ? (
+        <p className="text-[13px] text-red">{error}</p>
+      ) : sent ? (
+        <div className="label text-green">✓ SENT</div>
+      ) : (
+        ready && draftId && <ConfirmSend draftId={draftId} />
+      )}
+    </CardIn>
+  );
+}
+
+export function ConnectorSendCard({ result, status }: ToolCallMessagePartProps) {
+  const error = resultError(result);
+  const draftId = draftIdOf(result);
+  const sent = !!result && typeof result === "object" && (result as { status?: string }).status === "sent";
+  const waiting = !!result && typeof result === "object" && (result as { status?: string }).status === "awaiting_confirm";
+  return (
+    <CardIn className="glass flex flex-col gap-3 rounded-2xl p-4">
+      <div className="label text-gold">SEND</div>
+      {status.type === "running" ? (
+        <Shimmer w="50%" />
+      ) : sent ? (
+        <div className="label text-green">✓ SENT</div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <p className="text-[13.5px] leading-snug text-[#F4E3BC]">{error || "Sending waits for an explicit confirm."}</p>
+          {waiting && draftId && <ConfirmSend draftId={draftId} />}
+        </div>
+      )}
     </CardIn>
   );
 }

@@ -8,7 +8,7 @@ Built for the Build Personal Agents Hack. MIT licensed, every dependency is open
 
 - **Chat with Kobe** built on [assistant-ui](https://www.assistant-ui.com) primitives. Replies stream in and render tool calls as cards: people lists, pregame briefs, message drafts, and schedule conflicts.
 - **Live agent (optional).** With Neon AI Gateway credentials, `/api/chat` runs a [Mastra](https://mastra.ai) agent over your roster. Without them, a scripted offline agent answers a few questions with the same cards.
-- **Message drafts you send yourself.** Kobe cannot send messages. "Copy for Instagram" copies the draft to your clipboard and logs the touch on that person's record. With Postgres, the draft text is stored with it.
+- **Message drafts you send yourself.** "Copy for Instagram" copies the draft to your clipboard and logs the touch on that person's record. With Postgres, the draft text is stored with it. Gmail and Slack can search and draft when those accounts are connected. Sending either one waits until you explicitly confirm.
 - **Season mode.** XP, levels (Rookie → Mamba), a streak of consecutive active days, assists for every draft you log, and a three-play game plan per day.
 - **Game plan you set.** From chat or the game-plan panel, set a trigger or a routine on a person already in the roster. A trigger reads a birthday, last touch, next plan, or open loop already on that record. A routine is a daily or weekly check-in. With Postgres it is stored in `plans` on that person. Without a database it is stored in this browser. Setting one does not connect an inbox, calendar, or social account.
 - **Scouting reports** per person with a rapport score that rises as you keep in touch.
@@ -16,11 +16,11 @@ Built for the Build Personal Agents Hack. MIT licensed, every dependency is open
 
 ## What is sample data
 
-The scouting feed, the calendar, and the five people in the seed roster are a scripted demo. The feed is a fixed list of alerts in `lib/data.ts` that appear on a timer after the page loads. The calendar is a constant in `lib/roster.ts`. The Integrations and "Add Kobe to…" panels list planned sources and channels; none of them are connected.
+The scouting feed, the calendar, and the five people in the seed roster are a scripted demo. The feed is a fixed list of alerts in `lib/data.ts` that appear on a timer after the page loads. The calendar is a constant in `lib/roster.ts`. The Integrations and "Add Kobe to…" panels list planned sources and channels. Gmail and Slack show as connected only after their tokens answer a live probe. Luma stays disconnected. Kobe does not call Notion, Linear, Drive, or Apify.
 
 ## The agent
 
-Kobe is a Mastra agent (`lib/kobe-agent.ts`) served from `/api/chat` and streamed into assistant-ui as an AI SDK v7 UI message stream. It reasons over the roster (from Postgres, or the seed when there is no database) and the sample calendar, and answers by calling one of four tools: `show_people`, `pregame_brief`, `draft_message`, `resolve_conflict`. The page and the agent read the same roster, so the cards show the same people the agent sees.
+Kobe is a Mastra agent (`lib/kobe-agent.ts`) served from `/api/chat` and streamed into assistant-ui as an AI SDK v7 UI message stream. It reasons over the roster (from Postgres, or the seed when there is no database) and the sample calendar, and answers by calling one of four tools: `show_people`, `pregame_brief`, `draft_message`, `resolve_conflict`. When Gmail or Slack is really connected, the agent also gets that account's search and draft tools. Send tools do nothing until the latest message is an explicit confirmation, or you confirm on the draft card. The page and the agent read the same roster, so the cards show the same people the agent sees.
 
 There is no agent memory. The browser sends the whole thread with each message.
 
@@ -43,6 +43,9 @@ NEON_AI_GATEWAY_TOKEN="nt_live_..."
 NEON_AI_GATEWAY_BASE_URL="https://<branch>-api.ai.<cell>.<region>.aws.neon.tech"
 # Optional, defaults to neon/gpt-oss-120b
 KOBE_MODEL="neon/gpt-oss-120b"
+# Optional. Leave blank and Gmail or Slack stays disconnected.
+GMAIL_ACCESS_TOKEN=""
+SLACK_USER_TOKEN=""
 ```
 
 `pnpm dev` is the Next app. Its chat stays on `/api/chat`. `pnpm dev:vite` is the Vite court. It reads the gateway token, base URL, model, and `KOBE_PASSWORD` from that same `.env.local` inside the Node process. The browser bundle does not receive the token.

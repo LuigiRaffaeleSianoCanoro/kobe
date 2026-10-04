@@ -1,5 +1,7 @@
 import { toAISdkStream } from "@mastra/ai-sdk";
+import { RequestContext } from "@mastra/core/request-context";
 import { createUIMessageStream, createUIMessageStreamResponse, safeValidateUIMessages, type UIMessage } from "ai";
+import { USER_TEXT } from "@/lib/connectors";
 import { buildKobeAgent } from "@/lib/kobe-agent";
 
 export const maxDuration = 60;
@@ -40,8 +42,11 @@ export async function POST(req: Request) {
     .slice(-MAX_MESSAGES)
     .map(withImportSummaries);
 
+  const requestContext = new RequestContext();
+  requestContext.setRaw(USER_TEXT, lastUserText(messages));
+
   const agent = await buildKobeAgent();
-  const stream = await agent.stream(messages, { maxSteps: 3 });
+  const stream = await agent.stream(messages, { maxSteps: 3, requestContext });
 
   const ui = createUIMessageStream({
     originalMessages: messages,
@@ -63,4 +68,14 @@ export async function POST(req: Request) {
     },
   });
   return createUIMessageStreamResponse({ stream: ui });
+}
+
+function lastUserText(messages: readonly { role: string; parts: readonly { type: string; text?: string }[] }[]) {
+  const last = [...messages].reverse().find((message) => message.role === "user");
+  if (!last) return "";
+  return last.parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text ?? "")
+    .join(" ")
+    .trim();
 }

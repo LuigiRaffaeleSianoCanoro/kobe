@@ -1,6 +1,7 @@
 import { Agent } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
+import { connectorInstructions, connectorMailbox, createConnectorTools, liveConnectors, type LiveConnectors, type Mailbox } from "./connectors";
 import { DRAFT_CHANNELS, type Person } from "./data";
 import { conditionFits, mentionsConnectedAccount, planDetail, recordSupports, PLAN_CONDITIONS } from "./plans";
 import { SAMPLE_CALENDAR, loadRoster } from "./roster";
@@ -9,7 +10,7 @@ import { SAMPLE_CALENDAR, loadRoster } from "./roster";
 // agent can later point at a self-hosted OpenAI-compatible server running the same model.
 const MODEL = process.env.KOBE_MODEL ?? "neon/gpt-oss-120b";
 
-function instructions(roster: Person[]) {
+function instructions(roster: Person[], flags: { gmail: boolean; slack: boolean }) {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   return `You are Kobe, a personal relationship agent. Mamba mentality applied to the people who matter: show up prepared and never miss the small things.
 
@@ -21,8 +22,9 @@ Style: one or two short sentences, warm and direct, with a light basketball flav
 - draft_message: when asked to write, reply, congratulate or wish someone well. Write the body in the user's own voice, specific to that person's details, under 280 characters. Pick the channel they last used.
 - resolve_conflict: when two calendar events overlap. Propose a fix and include a draft to the person affected.
 - set_plan: the user wants a trigger, routine, reminder, or game-plan item kept on someone already on the roster. kind is "trigger" or "routine". A trigger condition is birthday, last_touch, next_up, or open_loop, and it must already be on that person's record. A routine condition is daily or weekly. The label names the plan. The prompt is the short ask Kobe should run later, such as "Brief me on Marcus".
-If they ask you to watch an inbox, social network, calendar account, or any integration, call no tool. Say that no accounts are connected. Never invent a person or a connected account.
-You cannot send messages. Never say a message was sent; the user copies the draft from the card and sends it themselves. After a tool returns, do not repeat what the card shows. The set_plan card does not save until the user confirms.
+The draft_message card is something the user copies. Never say that card was sent. The set_plan card does not save until the user confirms. After a tool returns, do not repeat what the card shows.
+If they ask you to watch an inbox, social network, calendar account, or any integration that is not connected, call no tool. Never invent a person or a connected account.
+${connectorInstructions(flags)}
 
 ROSTER:
 ${JSON.stringify(roster)}
@@ -31,8 +33,11 @@ CALENDAR:
 ${JSON.stringify(SAMPLE_CALENDAR)}`;
 }
 
-export async function buildKobeAgent() {
+export async function buildKobeAgent(options?: { connectors?: LiveConnectors; mailbox?: Mailbox }) {
   const roster = await loadRoster();
+  const connectors = options?.connectors ?? (await liveConnectors());
+  const mailbox = options?.mailbox ?? connectorMailbox;
+  const flags = { gmail: connectors.gmail !== null, slack: connectors.slack !== null };
   const [first, ...rest] = roster.map((r) => r.id);
   if (!first) throw new Error("Kobe needs at least one person in the roster.");
   const personId = z.enum([first, ...rest]);
@@ -109,8 +114,15 @@ export async function buildKobeAgent() {
   return new Agent({
     id: "kobe",
     name: "Kobe",
-    instructions: instructions(roster),
+    instructions: instructions(roster, flags),
     model: MODEL,
-    tools: { show_people, pregame_brief, draft_message, resolve_conflict, set_plan },
+    tools: {
+      show_people,
+      pregame_brief,
+      draft_message,
+      resolve_conflict,
+      set_plan,
+      ...createConnectorTools({ gmail: connectors.gmail, slack: connectors.slack, mailbox }),
+    },
   });
 }

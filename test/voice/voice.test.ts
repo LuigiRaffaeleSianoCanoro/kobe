@@ -107,3 +107,80 @@ describe("voice turns and mute", () => {
     expect(store.get("kobe.voice.muted")).toBe("0");
   });
 });
+
+describe("private mode", () => {
+  class Recognition extends EventTarget {
+    static count = 0;
+    constructor() {
+      super();
+      Recognition.count++;
+    }
+    lang = "";
+    continuous = false;
+    interimResults = false;
+    start() {}
+    stop() {}
+    abort() {}
+  }
+  class FakeWorker {
+    static posted: unknown[] = [];
+    postMessage(message: unknown) {
+      FakeWorker.posted.push(message);
+    }
+    addEventListener() {}
+  }
+  let store: Map<string, string>;
+
+  async function load(browser: { webSpeech: boolean }) {
+    vi.resetModules();
+    vi.stubGlobal("window", browser.webSpeech ? { SpeechRecognition: Recognition } : {});
+    vi.stubGlobal("navigator", { language: "es-AR", languages: ["es-AR"], mediaDevices: { getUserMedia: () => new Promise(() => {}) } });
+    vi.stubGlobal("localStorage", { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) });
+    vi.stubGlobal("Worker", FakeWorker);
+    vi.stubGlobal("AudioWorkletNode", class {});
+    vi.stubGlobal("AudioContext", class { close() {} });
+    return import("../../lib/voice");
+  }
+
+  beforeEach(() => {
+    store = new Map();
+    Recognition.count = 0;
+    FakeWorker.posted = [];
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is off by default and uses the browser's recognizer", async () => {
+    const { canDictate, canGoPrivate, dictation } = await load({ webSpeech: true });
+    expect(canGoPrivate).toBe(true);
+    expect(canDictate({ private: false })).toBe(true);
+    dictation!.listen();
+    expect(Recognition.count).toBe(1);
+    expect(FakeWorker.posted).toEqual([]);
+  });
+
+  it("turning it on starts the one-time download and survives a reload", async () => {
+    const first = await load({ webSpeech: true });
+    first.voice.setPrivate(true);
+    expect(store.get("kobe.voice.private")).toBe("1");
+    expect(FakeWorker.posted).toEqual([{ type: "load", model: "onnx-community/whisper-base", host: "https://huggingface.co/" }]);
+
+    const reloaded = await load({ webSpeech: true });
+    reloaded.dictation!.listen();
+    expect(Recognition.count).toBe(0);
+    expect(FakeWorker.posted.at(-1)).toMatchObject({ type: "load" });
+  });
+
+  it("uses the server's model source", async () => {
+    const { voice } = await load({ webSpeech: true });
+    voice.configureWhisper({ model: "kobe/whisper", host: "https://kobe.local/" });
+    voice.setPrivate(true);
+    expect(FakeWorker.posted).toEqual([{ type: "load", model: "kobe/whisper", host: "https://kobe.local/" }]);
+  });
+
+  it("gives Firefox a mic once private mode is on", async () => {
+    const { canDictate, dictation } = await load({ webSpeech: false });
+    expect(dictation).toBeDefined();
+    expect(canDictate({ private: false })).toBe(false);
+    expect(canDictate({ private: true })).toBe(true);
+  });
+});

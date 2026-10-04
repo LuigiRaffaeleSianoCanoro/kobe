@@ -17,7 +17,7 @@ import {
   type EmptyMessagePartProps,
 } from "@assistant-ui/react";
 import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
-import { Mic, Paperclip, Square, Volume2, VolumeX } from "lucide-react";
+import { Lock, LockOpen, Mic, Paperclip, Square, Volume2, VolumeX } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
 import { createContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type MouseEvent, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
@@ -27,8 +27,9 @@ import { CHANNELS, PLAYS, RECORDS, SAMPLE_CALENDAR, SOURCE_GROUPS, levelFor, typ
 import { game, registerAsk, useGame } from "@/lib/game";
 import { weeklyMixtape, type TouchNote } from "@/lib/highlights";
 import { NOTE_MAX, clipFrom } from "@/lib/tape";
-import { LANG_NAMES, dictation, speech, useHydrated, useVoice, voice } from "@/lib/voice";
+import { LANG_NAMES, canDictate, canGoPrivate, dictation, speech, useHydrated, useVoice, voice } from "@/lib/voice";
 import { describeImport, whatsAppAttachments, type ImportResult } from "@/lib/whatsapp/upload";
+import type { WhisperConfig } from "@/lib/whisper";
 import { browserRoster, RosterControl } from "./roster-panel";
 import { CourtShader } from "./court-shader";
 import { HighlightsCard, MixtapeView } from "./mixtape";
@@ -115,7 +116,10 @@ function RecordsKobe({ connectors, ...wiring }: Wiring & { connectors: Connector
   return <Court runtime={runtime} persisted={wiring.persisted} connectors={connectors} />;
 }
 
-export function KobeApp({ live, connectors, ...wiring }: Wiring & { live: boolean; connectors: ConnectorFlags }) {
+export function KobeApp({ live, connectors, whisper, ...wiring }: Wiring & { live: boolean; connectors: ConnectorFlags; whisper?: WhisperConfig }) {
+  useEffect(() => {
+    if (whisper) voice.configureWhisper(whisper);
+  }, [whisper]);
   return live ? <LiveKobe connectors={connectors} {...wiring} /> : <RecordsKobe connectors={connectors} {...wiring} />;
 }
 
@@ -610,7 +614,7 @@ function Composer({ imports }: { imports: boolean }) {
           aria-label={PLACEHOLDER}
           className="h-10 min-w-0 flex-1 resize-none bg-transparent py-2.5 text-[15.5px] text-chalk outline-none placeholder:text-chalk-3"
         />
-        <MuteToggle />
+        <VoiceControls />
         <Dictation />
         <ComposerPrimitive.Send asChild>
           <button title="Send" className="ball flex-none rounded-full shadow-[0_6px_18px_rgba(224,113,42,.45)] disabled:opacity-60">
@@ -622,26 +626,17 @@ function Composer({ imports }: { imports: boolean }) {
   );
 }
 
-// Push-to-talk. Hidden until hydration and in browsers without Web Speech.
-function Dictation() {
+// Mute, private mode and language: small controls grouped without gaps so the input keeps room on a phone.
+function VoiceControls() {
   const hydrated = useHydrated();
   const lang = useVoice((s) => s.lang);
   const listening = useAuiState((s) => s.composer.dictation != null);
-  const [local, setLocal] = useState(false);
-  const handoff = useFocusHandoff(() => voice.notify(null));
-  useEffect(() => {
-    let live = true;
-    dictation?.prepare().then(() => live && setLocal(!!dictation?.isLocal()));
-    return () => {
-      live = false;
-    };
-  }, [lang]);
   if (!hydrated || !dictation) return null;
-
   const other = lang === "es" ? "en" : "es";
-  const dictate = `Dictate in ${LANG_NAMES[lang]}${local ? ", on this device" : ""}`;
   return (
-    <>
+    <div className="flex flex-none items-center">
+      <MuteToggle />
+      <PrivateToggle listening={listening} />
       <button
         type="button"
         disabled={listening}
@@ -652,6 +647,49 @@ function Dictation() {
       >
         {lang}
       </button>
+    </div>
+  );
+}
+
+// Private dictation runs Whisper on this device. The gold lock means it is on.
+function PrivateToggle({ listening }: { listening: boolean }) {
+  const on = useVoice((s) => s.private);
+  if (!canGoPrivate) return null;
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      disabled={listening}
+      onClick={() => voice.setPrivate(!on)}
+      title={on ? "Private dictation is on: speech is transcribed on this device" : "Private dictation: transcribe on this device"}
+      aria-label="Private dictation"
+      className={`press grid h-8 w-8 flex-none place-items-center rounded-full hover:text-gold disabled:opacity-40 ${on ? "text-gold" : "text-chalk-3"}`}
+    >
+      {on ? <Lock size={15} aria-hidden /> : <LockOpen size={15} aria-hidden />}
+    </button>
+  );
+}
+
+// Push-to-talk. Hidden until hydration, and when the current mode has no engine (Firefox without private mode).
+function Dictation() {
+  const hydrated = useHydrated();
+  const lang = useVoice((s) => s.lang);
+  const ready = useVoice(canDictate);
+  const privateMode = useVoice((s) => s.private);
+  const [local, setLocal] = useState(false);
+  const handoff = useFocusHandoff(() => voice.notify(null));
+  useEffect(() => {
+    let live = true;
+    dictation?.prepare().then(() => live && setLocal(!!dictation?.isLocal()));
+    return () => {
+      live = false;
+    };
+  }, [lang, privateMode]);
+  if (!hydrated || !dictation || !ready) return null;
+
+  const dictate = `Dictate in ${LANG_NAMES[lang]}${local ? ", on this device" : ""}`;
+  return (
+    <>
       <AuiIf condition={(s) => s.composer.dictation == null}>
         <ComposerPrimitive.Dictate asChild>
           <button {...handoff} title={dictate} aria-label={dictate} className="mic glass press grid h-10 w-10 flex-none place-items-center rounded-full text-chalk-2">
@@ -672,9 +710,8 @@ function Dictation() {
 
 // Mutes the replies Kobe reads on its own. A tap on a message's speaker still reads it.
 function MuteToggle() {
-  const hydrated = useHydrated();
   const muted = useVoice((s) => s.muted);
-  if (!hydrated || !speech || !dictation) return null;
+  if (!speech) return null;
   return (
     <button
       type="button"
@@ -691,20 +728,34 @@ function MuteToggle() {
 
 function VoiceNotice() {
   const notice = useVoice((s) => s.notice);
+  const download = useVoice((s) => s.download);
   const reduce = useReducedMotion();
+  const share = download && download.total > 0 ? download.loaded / download.total : null;
+  const text = download ? "Downloading the private speech model" : notice;
   return (
     <div role="status" aria-live="polite" className="mx-auto flex max-w-[720px] justify-center">
       <AnimatePresence>
-        {notice && (
+        {text && (
           <motion.div
-            key={notice}
+            key={download ? "download" : text}
             initial={{ opacity: 0, transform: reduce ? "none" : "translateY(6px)" }}
             animate={{ opacity: 1, transform: "translateY(0px)" }}
             exit={{ opacity: 0, transition: { duration: 0.15 } }}
             transition={{ duration: 0.25, ease: EASE_OUT }}
-            className="glass mb-2 rounded-full px-4 py-2 text-center text-[13px] leading-snug text-chalk-2 [text-wrap:pretty]"
+            className="glass mb-2 rounded-[18px] px-4 py-2 text-center text-[13px] leading-snug text-chalk-2 [text-wrap:pretty]"
           >
-            {notice}
+            {text}
+            {share !== null && download && (
+              <>
+                {/* The percentage stays out of the live region, so screen readers aren't flooded. */}
+                <span aria-hidden className="label ml-2 text-gold">
+                  {Math.round(share * 100)}% · {Math.round(download.total / 1e6)} MB
+                </span>
+                <span role="progressbar" aria-label="Private speech model download" aria-valuenow={Math.round(share * 100)} aria-valuemin={0} aria-valuemax={100} className="mt-1.5 block h-1 overflow-hidden rounded-full bg-white/10">
+                  <span className="block h-full origin-left bg-gold transition-transform duration-150 motion-reduce:transition-none" style={{ transform: `scaleX(${share})` }} />
+                </span>
+              </>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

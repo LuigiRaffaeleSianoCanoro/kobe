@@ -13,6 +13,7 @@
   "dependencies": {
     "@assistant-ui/react": "^0.15.23",
     "@assistant-ui/react-ai-sdk": "^1.4.14",
+    "@huggingface/transformers": "^4.3.0",
     "@mastra/ai-sdk": "^1.10.6",
     "@mastra/core": "^1.74.0",
     "@neon/ai-sdk-provider": "^1.0.0",

@@ -157,3 +157,11 @@ test("asking for the mixtape does not steal birthdays, conflicts, or briefs", ()
   assert.equal(scriptedReply("Draft a birthday message for Maya").tool?.toolName, "draft_message");
   assert.doesNotMatch(scriptedReply("This week's mixtape").text, /posted|run club|connected account/i);
 });
+
+test("a named person or a brief is that person's card, not the mixtape", () => {
+  assert.equal(scriptedReply("What happened with Dev").tool?.toolName, "draft_message");
+  assert.equal(scriptedReply("what happened with Marcus").tool?.toolName, "pregame_brief");
+  assert.equal(scriptedReply("Brief me on what happened with Marcus").tool?.toolName, "pregame_brief");
+  assert.equal(scriptedReply("What happened at coffee with Marcus?").tool?.toolName, "pregame_brief");
+  assert.equal(scriptedReply("What happened this week?").tool?.toolName, "weekly_highlights");
+});

@@ -71,6 +71,5 @@ That starts Postgres 17 with the schema preloaded and the app on http://localhos
 | Mastra | Apache-2.0 |
 | AI SDK | Apache-2.0 |
 | Motion | MIT |
-| Paper Shaders | Apache-2.0 |
 | postgres.js | Unlicense |
 | Postgres / Neon | PostgreSQL / Apache-2.0 |

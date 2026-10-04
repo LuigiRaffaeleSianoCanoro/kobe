@@ -9,7 +9,6 @@ import {
   type AssistantRuntime,
 } from "@assistant-ui/react";
 import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/react-ai-sdk";
-import { Dithering } from "@paper-design/shaders-react";
 import { AnimatePresence, motion, useReducedMotion, useSpring, useTransform } from "motion/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { kobeAdapter } from "@/lib/agent";
@@ -222,19 +221,7 @@ function Hero() {
     [],
   );
   return (
-    <div className="relative mb-5 flex flex-col gap-3.5">
-      <div className="pointer-events-none absolute -top-6 right-0 hidden h-40 w-40 sm:block" aria-hidden>
-        <Dithering
-          style={{ width: "100%", height: "100%" }}
-          colorBack="#00000000"
-          colorFront="#E0712A"
-          shape="sphere"
-          type="4x4"
-          size={2}
-          scale={0.62}
-          speed={reduce ? 0 : 0.6}
-        />
-      </div>
+    <div className="mb-5 flex flex-col gap-3.5">
       <span className="label text-gold">COURTSIDE · {today}</span>
       <h1 className="display max-w-[560px] text-[clamp(52px,8.5vw,92px)] [text-wrap:balance]">
         {["Know", "your", "people."].map((w, i) => (

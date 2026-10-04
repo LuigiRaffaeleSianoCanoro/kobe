@@ -20,9 +20,6 @@ importers:
       '@mastra/core':
         specifier: ^1.74.0
         version: 1.74.0(ai@7.0.127(zod@4.6.5))(zod@4.6.5)
-      '@paper-design/shaders-react':
-        specifier: ^0.0.81
-        version: 0.0.81(@types/react@19.3.0)(react@19.2.8)
       ai:
         specifier: ^7.0.127
         version: 7.0.127(zod@4.6.5)
@@ -507,18 +504,6 @@ packages:
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [win32]
-
-  '@paper-design/shaders-react@0.0.81':
-    resolution: {integrity: sha512-3FMkeZqj9sSvK/WkgekGu3crnOQd4R2iH8IT+jVBuQmq1m8p88VFvxh63s9bSt2exBwjBNaRfSo0FSCeNxqh3w==}
-    peerDependencies:
-      '@types/react': ^18 || ^19
-      react: ^18 || ^19
-    peerDependenciesMeta:
-      '@types/react':
-        optional: true
-
-  '@paper-design/shaders@0.0.81':
-    resolution: {integrity: sha512-jeGdyjMscZ2bxmQdo8lhwUufHUf4iq3s1ayjh8PXU7Go42Rw8E3I0It1FZdc3HuWt5J82m//DRWaxsRqRfA4Gg==}
 
   '@posthog/core@1.55.3':
     resolution: {integrity: sha512-XnmG9jo7WlxTeN4oCNWH4ESLQHR6ZPZ+mcq+8JxU62k5i1BAe3BSrybnmXHjqKp7e3rUvLK2bOzGZGSlfHvlNA==}
@@ -2724,15 +2709,6 @@ snapshots:
 
   '@next/swc-win32-x64-msvc@16.3.8':
     optional: true
-
-  '@paper-design/shaders-react@0.0.81(@types/react@19.3.0)(react@19.2.8)':
-    dependencies:
-      '@paper-design/shaders': 0.0.81
-      react: 19.2.8
-    optionalDependencies:
-      '@types/react': 19.3.0
-
-  '@paper-design/shaders@0.0.81': {}
 
   '@posthog/core@1.55.3':
     dependencies:

@@ -12,7 +12,6 @@
     "@assistant-ui/react-ai-sdk": "^1.4.14",
     "@mastra/ai-sdk": "^1.10.6",
     "@mastra/core": "^1.74.0",
-    "@paper-design/shaders-react": "^0.0.81",
     "ai": "^7.0.127",
     "clsx": "^2.1.1",
     "lucide-react": "^1.52.0",

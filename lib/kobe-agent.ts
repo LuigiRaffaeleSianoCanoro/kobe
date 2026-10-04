@@ -2,36 +2,42 @@ import { Agent } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { DRAFT_CHANNELS, type Person } from "./data";
+import { weeklyMixtape } from "./highlights";
 import { conditionFits, mentionsConnectedAccount, planDetail, recordSupports, PLAN_CONDITIONS } from "./plans";
-import { SAMPLE_CALENDAR, loadRoster } from "./roster";
+import { SAMPLE_CALENDAR, loadRoster, loadTouches } from "./roster";
+import { coachingBlock, type CoachingItem } from "./tape";
 
 // Any model in the Neon AI Gateway catalog works. The default is open-weight, so the same
 // agent can later point at a self-hosted OpenAI-compatible server running the same model.
 const MODEL = process.env.KOBE_MODEL ?? "neon/gpt-oss-120b";
 
-function instructions(roster: Person[]) {
+function instructions(roster: Person[], coaching: CoachingItem[]) {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   return `You are Kobe, a personal relationship agent. Mamba mentality applied to the people who matter: show up prepared and never miss the small things.
 
-Today is ${today}. The ROSTER and CALENDAR below are the only facts you know. Never invent people, dates, events or details.
+Today is ${today}. The ROSTER, CALENDAR and COACHING NOTES below are the only facts you know. Never invent people, dates, events, accounts or details. Coaching notes are a review of a past situation already on that person's record. They are not a connected inbox or social account. Follow a coaching note whenever that person comes up.
 
 Style: one or two short sentences, warm and direct, with a light basketball flavor. Then call exactly one tool so the user sees a card:
 - show_people: any list of people (birthdays coming up, who is cooling off, who to check in with).
-- pregame_brief: before meeting someone, or when asked about a specific person.
+- pregame_brief: before meeting someone, or when asked about a specific person. Also use this when they name a person and ask what happened with them, or ask you to review that person's tape.
 - draft_message: when asked to write, reply, congratulate or wish someone well. Write the body in the user's own voice, specific to that person's details, under 280 characters. Pick the channel they last used.
 - resolve_conflict: when two calendar events overlap. Propose a fix and include a draft to the person affected.
 - set_plan: the user wants a trigger, routine, reminder, or game-plan item kept on someone already on the roster. kind is "trigger" or "routine". A trigger condition is birthday, last_touch, next_up, or open_loop, and it must already be on that person's record. A routine condition is daily or weekly. The label names the plan. The prompt is the short ask Kobe should run later, such as "Brief me on Marcus".
-If they ask you to watch an inbox, social network, calendar account, or any integration, call no tool. Say that no accounts are connected. Never invent a person or a connected account.
+- weekly_highlights: this week's mixtape from dates already on the stored records. Call it for highlights, a mixtape, a recap, or what happened this week when no specific person is named. Do not list the events yourself. A named person, or any brief, is not the mixtape.
+If they ask you to watch an inbox, social network, calendar account, or any integration, call no tool. Say that no accounts are connected. Never invent a person or a connected account. Never say an inbox, social, or calendar account is connected.
 You cannot send messages. Never say a message was sent; the user copies the draft from the card and sends it themselves. After a tool returns, do not repeat what the card shows. The set_plan card does not save until the user confirms.
 
 ROSTER:
 ${JSON.stringify(roster)}
 
-CALENDAR:
-${JSON.stringify(SAMPLE_CALENDAR)}`;
+CALENDAR (sample data already in the app, not a connected account):
+${JSON.stringify(SAMPLE_CALENDAR)}
+
+COACHING NOTES:
+${coachingBlock(roster, coaching)}`;
 }
 
-export async function buildKobeAgent() {
+export async function buildKobeAgent(coaching: CoachingItem[] = []) {
   const roster = await loadRoster();
   const [first, ...rest] = roster.map((r) => r.id);
   if (!first) throw new Error("Kobe needs at least one person in the roster.");
@@ -79,6 +85,15 @@ export async function buildKobeAgent() {
     execute: async ({ recordId }) => ({ to: roster.find((r) => r.id === recordId)!.name, status: "awaiting user" }),
   });
 
+  const weekly_highlights = createTool({
+    id: "weekly_highlights",
+    description: "Show this week's mixtape. The server fills it from stored records, their notes, logged drafts, and the sample calendar. Call this for highlights, a mixtape, a recap, or what happened this week when no person is named. Do not use it for a named person or a brief.",
+    inputSchema: z.object({
+      scope: z.string().optional().describe("Ignored. The server chooses the week and the tracks."),
+    }),
+    execute: async () => weeklyMixtape(roster, SAMPLE_CALENDAR, new Date(), await loadTouches()),
+  });
+
   const set_plan = createTool({
     id: "set_plan",
     description: "Propose a trigger or routine saved on a person already on the roster. The user confirms before it is stored. Do not use this for a connected account.",
@@ -109,8 +124,11 @@ export async function buildKobeAgent() {
   return new Agent({
     id: "kobe",
     name: "Kobe",
-    instructions: instructions(roster),
+    instructions: instructions(
+      roster,
+      coaching.filter((note) => roster.some((person) => person.id === note.personId)),
+    ),
     model: MODEL,
-    tools: { show_people, pregame_brief, draft_message, resolve_conflict, set_plan },
+    tools: { show_people, pregame_brief, draft_message, resolve_conflict, set_plan, weekly_highlights },
   });
 }

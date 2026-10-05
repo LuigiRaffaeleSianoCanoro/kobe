@@ -7,7 +7,7 @@ import { ASSIST_XP, FEED, PLAYS, SEED_ROSTER, type DraftChannel, type FeedItem, 
 import type { TouchNote } from "./highlights";
 import { PlanWrite, insertPlanRecord, planIdReuse, plansFromStoredJson, recordSupports, samePlan, withoutPlan, type Plan } from "./plans";
 import type { Season, SeasonEvent } from "./season";
-import { NOTE_MAX, TAPE_STORAGE_KEY, cleanNote, parseStoredCoaching } from "./tape";
+import { NOTE_MAX, TAPE_STORAGE_KEY, cleanNote, coachingFromServer, parseStoredCoaching, type StoredCoaching } from "./tape";
 import { newestTouches, recordSavedBody, rememberTouch } from "./touch-log";
 
 export type PlanStorage = "browser" | "postgres" | "session";
@@ -16,7 +16,7 @@ const PLAN_KEY = "kobe.plans.v1";
 export type Alert = FeedItem & { id: number; visible: boolean; auto?: boolean };
 export type Floater = { id: number; text: string };
 
-type Coaching = Record<string, { note: string; at: string }>;
+type Coaching = Record<string, StoredCoaching>;
 
 type GameState = {
   xp: number;
@@ -139,6 +139,7 @@ function sync(event?: SeasonEvent, onFail?: () => void, onOk?: () => void) {
   });
 }
 
+// A pull that started before a save must not write old notes back.
 let tapeGen = 0;
 
 function kept(people: Record<string, Person>, coaching: Coaching): Coaching {
@@ -209,27 +210,40 @@ async function pushTape(personId: string, note: string) {
 
 let tapeWrite: Promise<unknown> = Promise.resolve();
 function enqueueTape(task: () => Promise<unknown>) {
-  tapeWrite = tapeWrite.then(task, task);
+  tapeWrite = tapeWrite.then(task, task).then(() => undefined, () => undefined);
 }
 
+export function flushTape() {
+  return tapeWrite;
+}
+
+// A failed read leaves the browser copy alone. Local notes are dropped only after a successful read, except ones still waiting to sync.
 async function pullTape(people: Record<string, Person>) {
   const gen = ++tapeGen;
   const res = await fetch("/api/tape", { cache: "no-store" }).catch(() => null);
   if (!res?.ok || gen !== tapeGen) return;
-  const data = (await res.json().catch(() => null)) as { notes?: { personId?: string; note?: string; at?: string }[] } | null;
-  const incoming: Coaching = {};
-  for (const row of data?.notes ?? []) {
-    if (!row || typeof row.personId !== "string" || typeof row.note !== "string") continue;
-    const cleaned = cleanNote(row.note);
-    if (!cleaned.ok) continue;
-    incoming[row.personId] = { note: cleaned.note, at: typeof row.at === "string" ? row.at : new Date().toISOString() };
-  }
+  const data = (await res.json().catch(() => null)) as { notes?: unknown } | null;
+  if (!data || !Array.isArray(data.notes) || gen !== tapeGen) return;
+  const coaching = kept(people, coachingFromServer(new Set(Object.keys(people)), data.notes, state.coaching));
   if (gen !== tapeGen) return;
-  const localOnly = Object.entries(state.coaching).filter(([id]) => !incoming[id]);
-  const coaching = kept(people, { ...state.coaching, ...incoming });
   writeLocal(coaching);
   set({ coaching });
-  for (const [personId, value] of localOnly) enqueueTape(() => pushTape(personId, value.note));
+}
+
+function settlePending(personId: string, note: string) {
+  const current = state.coaching[personId];
+  const coaching = { ...state.coaching };
+  if (note) {
+    if (!current?.pending || current.note !== note) return;
+    coaching[personId] = { note: current.note, at: current.at };
+  } else if (current && !(current.pending && !current.note)) {
+    return;
+  } else {
+    delete coaching[personId];
+  }
+  const next = kept(state.people, coaching);
+  writeLocal(next);
+  set({ coaching: next });
 }
 
 let askImpl: (text: string) => void = () => {};
@@ -618,8 +632,10 @@ export const game = {
       return;
     }
     tapeGen++;
+    const at = new Date().toISOString();
     const coaching = { ...state.coaching };
-    if (cleaned.ok) coaching[personId] = { note: cleaned.note, at: new Date().toISOString() };
+    if (cleaned.ok) coaching[personId] = persisted ? { note: cleaned.note, at, pending: true } : { note: cleaned.note, at };
+    else if (persisted) coaching[personId] = { note: "", at, pending: true };
     else delete coaching[personId];
     const next = kept(state.people, coaching);
     const stored = writeLocal(next);
@@ -636,6 +652,7 @@ export const game = {
     const note = cleaned.ok ? cleaned.note : "";
     enqueueTape(async () => {
       const ok = await pushTape(personId, note);
+      if (ok) settlePending(personId, note);
       tapeAlert(ok, title, ok ? "Kobe will use it the next time this situation comes up." : "Kept in this browser. The database did not store it.");
     });
   },

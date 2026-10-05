@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { publishCoaching } from "./coaching-memory";
 import { reply } from "./agent";
-import { cleanNote, clipFrom, mergeCoaching, parseStoredCoaching, withCoaching } from "./tape";
+import { adoptServerCoaching, cleanNote, clipFrom, coachingFromServer, isTapeListRequest, mergeCoaching, parseStoredCoaching, withCoaching } from "./tape";
 
 const maya = {
   id: "maya",
@@ -76,4 +76,71 @@ test("a person who is not on the roster is not replaced with someone who is", ()
   const reviewed = reply("Review the tape on Sarah");
   assert.equal(reviewed.tool?.toolName, "show_people");
   assert.doesNotMatch(reviewed.text, /Marcus/);
+});
+
+test("naming coach does not open the tape", () => {
+  const reviewed = reply("Can you coach me through the Thursday conflict?");
+  assert.equal(reviewed.tool?.toolName, "resolve_conflict");
+});
+
+test("adoptServerCoaching drops a ghost and a blank note", () => {
+  const adopted = adoptServerCoaching(new Set(["maya", "dev"]), [
+    { personId: "ghost", note: "nope", at: "t" },
+    { personId: "maya", note: "   ", at: "t" },
+    { personId: "maya", note: "x".repeat(401), at: "t" },
+    { personId: "dev", note: "Keep the intro." },
+  ]);
+  assert.deepEqual(adopted, { dev: { note: "Keep the intro.", at: new Date(0).toISOString() } });
+});
+
+test("isTapeListRequest is only an unnamed review", () => {
+  const names = ["Maya Chen"];
+  assert.equal(isTapeListRequest("Review game tape", names), true);
+  assert.equal(isTapeListRequest("Review the tape on Sarah", names), true);
+  assert.equal(isTapeListRequest("Review the tape on Maya", names), false);
+  assert.equal(isTapeListRequest("Brief me on Maya", names), false);
+});
+
+test("an empty client list leaves the saved note", () => {
+  const merged = mergeCoaching(new Set(["maya"]), [{ personId: "maya", note: "old" }], []);
+  assert.deepEqual(merged, [{ personId: "maya", note: "old" }]);
+});
+
+test("pending notes survive a successful server read", () => {
+  const roster = new Set(["maya", "dev"]);
+  assert.deepEqual(
+    coachingFromServer(roster, [], { maya: { note: "Send the playlist.", at: "t", pending: true } }),
+    { maya: { note: "Send the playlist.", at: "t", pending: true } },
+  );
+  assert.deepEqual(
+    coachingFromServer(roster, [{ personId: "maya", note: "Server copy.", at: "s" }], { maya: { note: "", at: "t", pending: true } }),
+    { maya: { note: "", at: "t", pending: true } },
+  );
+  assert.deepEqual(
+    coachingFromServer(roster, [{ personId: "dev", note: "Keep.", at: "s" }], {
+      maya: { note: "Old local.", at: "t" },
+      dev: { note: "Different.", at: "t" },
+    }),
+    { dev: { note: "Keep.", at: "s" } },
+  );
+  assert.deepEqual(
+    coachingFromServer(roster, [{ personId: "maya", note: "Same.", at: "s" }], { maya: { note: "Same.", at: "t", pending: true } }),
+    { maya: { note: "Same.", at: "s" } },
+  );
+  assert.deepEqual(coachingFromServer(new Set(["dev"]), [], { ghost: { note: "x", at: "t", pending: true } }), {});
+});
+
+test("parseStoredCoaching keeps a pending note and a pending clear", () => {
+  assert.deepEqual(
+    parseStoredCoaching({
+      maya: { note: "Lead with the intro.", at: "t", pending: true },
+      dev: { note: "", at: "t", pending: true },
+      bad: { note: "", at: "t" },
+      junk: { note: 1 },
+    }),
+    {
+      maya: { note: "Lead with the intro.", at: "t", pending: true },
+      dev: { note: "", at: "t", pending: true },
+    },
+  );
 });

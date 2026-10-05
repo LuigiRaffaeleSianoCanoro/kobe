@@ -25,7 +25,7 @@ type RecognitionClass = {
   install?: (options: LocalOptions) => Promise<boolean>;
 };
 
-export type DictationError = "denied" | "no-mic" | "no-speech" | "network" | "language" | "unavailable" | "failed";
+export type DictationError = "denied" | "no-mic" | "no-speech" | "network" | "language" | "unavailable" | "model" | "failed";
 
 const ERRORS: Record<string, DictationError> = {
   "not-allowed": "denied",

@@ -4,6 +4,7 @@ import { connectorFlags } from "@/lib/connectors";
 import { SEED_ROSTER } from "@/lib/data";
 import { sql } from "@/lib/db";
 import { loadRoster, loadTouches } from "@/lib/roster";
+import { whisperConfigFromEnv } from "@/lib/whisper";
 
 // Read credentials at request time so Docker images pick them up from the runtime env.
 export const dynamic = "force-dynamic";
@@ -20,6 +21,7 @@ export default async function Page() {
       roster={api ? await loadRoster() : SEED_ROSTER}
       touches={api ? await loadTouches() : []}
       connectors={connectors}
+      whisper={whisperConfigFromEnv(process.env)}
     />
   );
 }
